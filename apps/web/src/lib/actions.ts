@@ -3,7 +3,7 @@
  *
  * Zapisujemy je zawsze — także gdy sieci nie ma wcale — bo celem jest „klikam w samolocie,
  * lecą po Wi-Fi”. Wysyłka realna istnieje wyłącznie w APK, gdzie apka ma Twoją sesję X
- * (patrz `bridge.ts` + `android/.../XLivePlugin.kt`). W przeglądarce akcje grzecznie czekają.
+ * (patrz `bridge.ts` + `android/.../XLivePlugin.java`). W przeglądarce akcje grzecznie czekają.
  */
 import { db } from '@/db/db';
 import { useSettings } from './store';

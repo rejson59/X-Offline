@@ -21,6 +21,8 @@ jobs:
         run: npm run test
       - name: Build produkcyjny (PWA)
         run: npm run build
+      - name: Projekt natywny — kontrola bez Android SDK
+        run: npm run verify:android
       - name: Proxy — składnia i smoke
         run: |
           node --check server/index.js

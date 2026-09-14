@@ -27,7 +27,9 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: false,
     captureInput: false,
-    webContentsDebuggingEnabled: true,
+    // Debugowanie WebView przez chrome://inspect. Zostaw wyłączone w APK, które
+    // udostępniasz dalej — w tej apce jest Twoja zalogowana sesja X.
+    webContentsDebuggingEnabled: false,
     backgroundColor: '#000000',
     appendUserAgent: 'XOfflineApp/0.1',
   },

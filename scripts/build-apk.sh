@@ -24,6 +24,9 @@ if [ ! -d android ]; then
   npx cap add android
 fi
 
+echo "→ kontrola projektu natywnego"
+npm run verify:android
+
 echo "→ build webu + synchronizacja"
 npm run build
 npx cap sync android

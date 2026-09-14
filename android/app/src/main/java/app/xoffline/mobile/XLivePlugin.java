@@ -20,7 +20,7 @@ import org.json.JSONTokener;
  *   XLive.replay([{id,kind,tweetId,tweetUrl}])  → { queued }  (+ wynik jako event „actionsDone”)
  *   addListener('tweetsCaptured' | 'actionsDone' | 'liveStatus' | 'captureLog')
  */
-@CapacitorPlugin(id = "XLive")
+@CapacitorPlugin(name = "XLive")
 public class XLivePlugin extends Plugin {
 
     private static volatile XLivePlugin current;
@@ -105,8 +105,11 @@ public class XLivePlugin extends Plugin {
                             Object parsed = new JSONTokener(unwrap(value)).nextValue();
                             if (parsed instanceof JSONObject) {
                                 JSONObject obj = (JSONObject) parsed;
-                                ret.put("collected", obj.optInt("collected", 0));
+                                int collected = obj.optInt("collected", 0);
+                                ret.put("collected", collected);
+                                ret.put("captured", collected);
                                 ret.put("target", obj.optInt("target", 0));
+                                ret.put("scrolling", obj.optBoolean("scrolling", false));
                                 ret.put("loggedIn", obj.optBoolean("loggedIn", false));
                                 ret.put("enabled", obj.optBoolean("enabled", true));
                                 ret.put("info", obj.optString("info", ""));
@@ -122,7 +125,8 @@ public class XLivePlugin extends Plugin {
     @PluginMethod
     public void replay(PluginCall call) {
         XLiveActivity activity = XLiveActivity.instance;
-        JSONArray actions = call.getArray("actions", new JSONArray());
+        JSONArray actions = call.getArray("actions");
+        if (actions == null) actions = new JSONArray();
         if (activity == null) {
             call.reject("Podgląd X nie jest otwarty — otwórz go, żeby wysłać akcje.");
             return;

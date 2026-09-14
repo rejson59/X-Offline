@@ -4,7 +4,7 @@ import { db } from '@/db/db';
 import { useQueue } from '@/lib/download';
 import { useFill } from '@/lib/autosync';
 import { useSettings } from '@/lib/store';
-import { bridge } from '@/lib/bridge';
+import { bridge, type LiveStatus } from '@/lib/bridge';
 import { isNative, probeProxy } from '@/lib/transport';
 import { maybeReplay, pendingCount } from '@/lib/actions';
 import { demoAccounts } from '@/lib/demo';
@@ -22,6 +22,18 @@ import {
 const COUNTS = [10, 25, 50, 100];
 const TARGETS = [50, 100, 200, 500];
 
+/** Krótki opis stanu zbierania w podglądzie X. */
+function liveSummary(live: LiveStatus): string {
+  if (!live.open) return 'Posty zbieramy przy przewijaniu — otwórz X, żeby zacząć.';
+  const got = live.captured ?? 0;
+  const target = live.target ? `/${live.target}` : '';
+  const parts = [`Zebrane w podglądzie: ${got}${target}`];
+  if (live.scrolling) parts.push('przewijam');
+  if (live.enabled === false) parts.push('zbieranie wyłączone');
+  if (live.loggedIn === false) parts.push('wygląda, że nie jesteś zalogowany');
+  return parts.join(' · ') + '.';
+}
+
 export function LiveTab() {
   const settings = useSettings((s) => s.settings);
   const patch = useSettings((s) => s.patch);
@@ -37,7 +49,7 @@ export function LiveTab() {
   const [count, setCount] = useState(25);
   const [frameKey, setFrameKey] = useState(0);
   const [proxy, setProxy] = useState<{ ok: boolean; note: string }>({ ok: false, note: 'sprawdzam…' });
-  const [live, setLive] = useState<{ open: boolean; loggedIn?: boolean; captured?: number }>({ open: false });
+  const [live, setLive] = useState<LiveStatus>({ open: false });
   const [pending, setPending] = useState(0);
 
   const accounts = useLiveQuery(() => db.accounts.toArray(), [], []);
@@ -52,6 +64,13 @@ export function LiveTab() {
     void pendingCount().then(setPending);
     void bridge.status().then(setLive);
   }, [settings.proxyUrl, pending]);
+
+  // Gdy podgląd X jest otwarty, licznik zebranych postów ma tykać sam z siebie.
+  useEffect(() => {
+    if (!live.open) return;
+    const t = window.setInterval(() => void bridge.status().then(setLive), 2500);
+    return () => window.clearInterval(t);
+  }, [live.open]);
 
   const frameUrl = useMemo(() => {
     const h = (handle || accounts[0]?.handle || demoAccounts[0]?.handle || 'XDevelopers').replace('@', '');
@@ -184,7 +203,7 @@ export function LiveTab() {
               </div>
               <div className="tiny dim">
                 {isNative() ?
-                  `Natywny WebView z Twoimi ciasteczkami. ${live.captured ? `Zebrane dotąd: ${live.captured}.` : 'Posty zbieramy przy przewijaniu.'}`
+                  `Natywny WebView z Twoimi ciasteczkami. ${liveSummary(live)}`
                 :
                   'Wersja przeglądarkowa nie może trzymać sesji X (ciasteczka są tylko na x.com). Zainstaluj APK, żeby mieć logowanie + auto-zapis.'}
               </div>

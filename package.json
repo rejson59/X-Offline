@@ -21,6 +21,8 @@
     "cap:add:android": "npx cap add android",
     "apk:debug": "cd android && ./gradlew assembleDebug",
     "apk:build": "bash scripts/build-apk.sh",
+    "apk:ci": "bash scripts/apk-ci.sh",
+    "verify:android": "node scripts/verify-android.mjs",
     "ci:install": "bash scripts/install-ci.sh",
     "native:sync": "node scripts/sync-native-assets.mjs"
   },

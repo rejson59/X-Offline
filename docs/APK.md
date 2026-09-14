@@ -9,15 +9,32 @@ Dwie drogi: **CI (zero narzędzi u Ciebie)** i **lokalnie**. Obie używają tego
 Repo → Actions → „Android APK” → Run workflow → variant: debug
 ```
 
+albo z terminala, bez klikania (ściąga artefakt do `dist-apk/`):
+
+```bash
+npm run apk:ci          # debug;  npm run apk:ci release  — wariant z podpisem (wymaga secrets)
+```
+
+Jeśli skrypt powie, że nie ma `.github/workflows/android.yml`, to znaczy, że workflow nadal leży tylko
+w `ci/` — przepnij go raz: `npm run ci:install && git add -f .github/workflows && git commit && git push`.
+
 Co robi workflow (`.github/workflows/android.yml`):
 
 1. `npm ci` → `npm run typecheck` → `npm run test` (nie budujemy APK z błędami),
 2. `npm run build` (PWA do `apps/web/dist`),
-3. `npx cap add android` (jeśli nie ma) + `npx cap sync android`,
-4. `./gradlew assembleDebug` (albo `assembleRelease bundleRelease` dla wariantu `release`),
-5. artefakty: `x-offline-apk-debug/…apk` oraz `x-offline-pwa.zip`.
+3. `npm run verify:android` — kontrola Gradla/zasobów/kontraktu mostka, zanim odpali się właściwy build,
+4. `npx cap add android` (jeśli nie ma) + `npx cap sync android` + `npm run native:sync` (skrypty wstrzykiwane),
+5. `./gradlew assembleDebug` (albo `assembleRelease bundleRelease` dla wariantu `release`),
+6. artefakty: `x-offline-apk-debug/…apk` oraz `x-offline-pwa.zip`.
 
 Na tagu `v0.1.0` dodatkowo tworzy GitHub Release z `.apk` + `.aab`.
+
+Czyli pełna ścieżka do **linku z plikiem APK** (do wysłania komuś):
+
+```bash
+npm run ci:install && git add -f .github/workflows && git commit -m "ci: pipeline" && git push
+git tag v0.1.0 && git push origin v0.1.0        # Actions zbuduje release i wrzuci APK do GitHub Releases
+```
 
 ### Wariant release z Twoim podpisem (żeby dało się aktualizować)
 
@@ -106,6 +123,10 @@ komentarzu + `docs/DANE.md`).
 
 ## 6. Rozwiązywanie problemów
 
+- **Wolisz złapać błąd przed gradle?** → `npm run verify:android` (mówi o brakujących pluginach w `capacitor.settings.gradle`,
+  źle nazwanym `@CapacitorPlugin`, niezbalansowanym XML-u i `getAssets()` wskazującym w pustkę).
+- **`chrome://inspect` nie widzi apki** → tak ma być w wariancie release: `webContentsDebuggingEnabled: false`
+  w `capacitor.config.ts`. Debug-APK da się podglądać always (jest `debuggable`).
 - **`SDK location not found`** → `ANDROID_HOME` albo `android/local.properties`.
 - **`Unsupported class file major version`** → JDK za nowy/stary dla gradle; użyj JDK 21 (`java -version`).
 - **Biały ekran po instalacji** → brak `npm run build` przed `cap sync`; sprawdź `android/app/src/main/assets/public/index.html`.

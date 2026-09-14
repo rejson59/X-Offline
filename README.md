@@ -96,10 +96,12 @@ Polecenia:
 
 ```bash
 npm run build        # apps/web/dist (PWA gotowe do wrzucenia na hosting)
-npm run test         # 28 testów: normalizacja, cache offline, limit miejsca, render UI
+npm run test         # 48 testów: normalizacja, cache offline, limit miejsca, kolejka akcji, render UI
 npm run typecheck
 npm run demo:gen     # regeneruje dane demo + media (scripts/gen-demo-data.mjs)
 npm run apk:build    # lokalny build debug-APK (wymaga JDK 21 + Android SDK)
+npm run apk:ci       # buduje APK na GitHub Actions i ściąga artefakt do dist-apk/ (wystarczy gh)
+npm run verify:android  # kontrola projektu natywnego bez Android SDK (gradle, zasoby, kontrakt mostka)
 ```
 
 ---
@@ -112,6 +114,8 @@ Dwa sposoby, oba opisane szczegółowo w [`docs/APK.md`](docs/APK.md):
    artefakt `x-offline-apk-debug`. Workflow buduje PWA, dokleja platformę Android, odpala `gradlew assembleDebug`
    i wypuszcza `x-offline-debug.apk` (a na tagu `v*` robi release z plikami `.apk` + `.aab`).
 2. **Lokalnie**: `npm run apk:build` (skrypt sam robi `npm run build`, `npx cap add android`, `cap sync` i gradle).
+3. **Jedną komendą z terminala**: `npm run apk:ci` — odpala ten sam workflow przez `gh`, czeka i zapisuje
+   `dist-apk/x-offline-debug.apk`. Działa też na maszynie bez Javy i Android SDK, bo kompilacja dzieje na Actions.
 
 Plik APK waży ~4 MB (Capacitor + WebView, bez Google Mobile Services). Minimalnie Android 7.0 (API 23).
 
@@ -152,7 +156,8 @@ apps/web/                 PWA + kod natywny (React 18, TS, Dexie, zustand, vite-
   src/components/        HomeTab, LiveTab, OfflineTab, SettingsTab, Reel, Sheets, PostCard…
 server/index.js          proxy node (tylko-do-czytania, allow-lista hostów, TTL cache, rate limit)
 cloudflare/worker.mjs    to samo na Cloudflare Workers (darmowy deploy)
-scripts/                 generatory: ikony PWA, dane demo, build APK
+scripts/                 generatory (ikony, demo), build APK lokalnie (build-apk.sh), apk-ci.sh (build na Actions),
+                         verify-android.mjs (kontrolka projektu natywnego bez Android SDK)
 .github/workflows/       web-ci.yml (testy + build), android.yml (APK/AAB + release)
 docs/APK.md              budowa i instalacja na telefonie
 docs/DANE.md             endpointy, ograniczenia, co zrobić gdy X coś zmieni
@@ -214,10 +219,13 @@ Co dostajesz:
 | **Web CI**      | push na `main`, pull request              | typecheck → testy → build PWA → smoke proxy → artefakt `web-dist` |
 | **Android APK** | `workflow_dispatch` albo tag `v*`         | `x-offline-debug.apk` / `release.apk` + `.aab` + `x-offline-pwa.zip` |
 
-Najszybsza droga do pliku APK: **Actions → Android APK → Run workflow (`variant: debug`)** i pobranie artefaktu.
-Chcesz, żebym spróbował zbudować APK w tym sandboxie — nie da się: nie ma tu dostępu do `dl.google.com`,
-`adoptium.net` ani `services.gradle.org` (blokada egress), więc gradle nie ściągnie narzędzi.
-Wystarczy jednak, że odpalisz workflow, a dostaniesz gotowy plik.
+Najszybsza droga do pliku APK: **Actions → Android APK → Run workflow (`variant: debug`)** i pobranie artefaktu,
+albo `npm run apk:ci` z terminala (ten sam build, ale bez klikania; `npm run apk:ci release` dla wariantu z podpisem).
+
+**Czego tu nie da się zrobić**: skompilować APK w tym środowisku. Nie ma dostępu do `dl.google.com`,
+`maven.google.com`, `services.gradle.org` ani `adoptium.net` (blokada egress) — a bez nich nie ma JDK,
+Android SDK ani zależności androidx/Capacitor. Dlatego projekt natywny jest w repo, `npm run verify:android`
+sprawdza wszystko, co da się sprawdzić bez narzędzi Google, a sam binarek robi Actions (albo Twój Android Studio).
 
 
 ## Udostępnianie z X do apki

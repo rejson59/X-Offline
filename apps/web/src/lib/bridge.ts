@@ -16,6 +16,19 @@ import { ingestTweets } from './capture';
 
 export type LiveTab = 'home' | 'bookmarks' | 'profile' | 'search';
 
+/** Stan podglądu X (to, co zwraca natywny `XLive.status()`). */
+export interface LiveStatus {
+  open: boolean;
+  /** Ile postów wstrzyknięty skrypt zebrał do tej pory. */
+  captured?: number;
+  target?: number;
+  loggedIn?: boolean;
+  enabled?: boolean;
+  scrolling?: boolean;
+  info?: string;
+  url?: string;
+}
+
 export interface OpenLiveOptions {
   tab?: LiveTab;
   handle?: string;
@@ -30,7 +43,7 @@ export interface OpenLiveOptions {
 interface XLivePlugin {
   open(opts: OpenLiveOptions): Promise<{ ok: boolean; url?: string }>;
   close(): Promise<{ ok: boolean }>;
-  status(): Promise<{ open: boolean; captured?: number; loggedIn?: boolean }>;
+  status(): Promise<LiveStatus>;
   replay(actions: unknown[]): Promise<{ queued?: number; raw?: string }>;
   addListener(eventName: string, listenerFunc: (event: unknown) => void): Promise<{ remove: () => void }>;
 }
@@ -104,7 +117,9 @@ export const bridge = {
     const b = await p.addListener('actionsDone', (event) => {
       void (async () => {
         const { reportResults } = await import('./actions');
-        const e = event as { results?: ReplayResult[] };
+        // Natywny mostek owija każdą payloadkę w { payload: ... } — musimy ją odwinąć.
+        const wrapped = event as { payload?: unknown; results?: ReplayResult[] };
+        const e = (wrapped.payload ?? wrapped) as { results?: ReplayResult[] };
         if (e.results?.length) await reportResults(e.results);
       })();
     });
