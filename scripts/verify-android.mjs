@@ -307,6 +307,45 @@ if (pluginFile && existsSync(bridgeFile)) {
   if (used.length && listened.length) pass(`kontrakt mostka: metody ${[...javaMethods].join('/')} + eventy ${[...javaEvents].join('/')}`);
 }
 
+/* ------------------- 5b. FileProvider a katalogi, do których zapisuje web (Directory.*) */
+
+const filePaths = join(RES, 'xml', 'file_paths.xml');
+// mapka jak w @capacitor/filesystem: LegacyFilesystemImplementation.getDirectory()
+const DIR_ROOTS = {
+  Documents: ['external'],
+  ExternalStorage: ['external'],
+  Data: ['files'],
+  Library: ['files'],
+  Cache: ['cache'],
+  External: ['external-files', 'external'],
+  ExternalCache: ['external-cache', 'external'],
+};
+
+if (!existsSync(filePaths)) {
+  err('brak res/xml/file_paths.xml — FileProvider z manifestu wskazuje w pustkę, więc eksport/Share padnie');
+} else {
+  const pathsXml = read(filePaths);
+  const declared = new Set([...pathsXml.matchAll(/<([\w-]+)-path\b[^>]*/g)].map((m) => m[1]));
+  for (const m of pathsXml.matchAll(/<(\w+-path)([^>]*)>/g)) {
+    if (!/path=/.test(m[2])) warn(`file_paths.xml: <${m[1]} bez atrybutu path="." — podkatalogi wypadną poza FileProvidera`);
+  }
+  const used = new Set();
+  let sharesFiles = false;
+  for (const f of walk(join(ROOT, 'apps/web/src'), (x) => /\.(ts|tsx)$/.test(x))) {
+    const src = read(f);
+    for (const m of src.matchAll(/Directory\.(\w+)/g)) used.add(m[1]);
+    if (/Share\.share\(/.test(src)) sharesFiles = true;
+  }
+  for (const dir of used) {
+    const acceptable = DIR_ROOTS[dir];
+    if (!acceptable || acceptable.some((root) => declared.has(root))) continue;
+    const what = `używamy Directory.${dir}, a file_paths.xml nie zna żadnego z: ${acceptable.map((r) => `<${r}-path>`).join(' / ')}`;
+    if (sharesFiles) err(`${what} — Share dostanie URI spoza FileProvidera (IllegalArgumentException na telefonie)`);
+    else warn(`${what} — plik będzie poza zasięgiem innych apek`);
+  }
+  if (used.size && sharesFiles) pass(`Directory.{${[...used].join(',')}} ma przykrycie w file_paths.xml (Share nie wybuchnie)`);
+}
+
 /* ------------------------------------------------------------- 6. wrapper gradle */
 
 const wrapperProps = read(join(ANDROID, 'gradle/wrapper/gradle-wrapper.properties'));

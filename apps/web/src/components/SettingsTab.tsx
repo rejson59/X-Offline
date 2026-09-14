@@ -385,7 +385,7 @@ export function SettingsTab() {
               const res = await saveTextFile(libraryFileName(), JSON.stringify(lib, null, 2));
               toast(
                 res.where === 'native' ?
-                  `Plik w Documents: ${res.path}`
+                  `Plik: ${res.label ?? 'Documents'}`
                 : `Wyeksportowano ${plural(lib.posts.length, 'post', 'posty', 'postów')}`,
                 'ok',
               );

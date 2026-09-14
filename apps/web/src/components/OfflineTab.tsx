@@ -68,7 +68,7 @@ export function OfflineTab() {
     const res = await saveTextFile(name, JSON.stringify(lib, null, 2));
     toast(
       res.where === 'native' ?
-        `Zapisano ${plural(lib.posts.length, 'plik', 'pliki', 'plików')} w Documents: ${res.path}`
+        `Zapisano ${plural(lib.posts.length, 'plik', 'pliki', 'plików')} — ${res.label ?? 'Documents'}`
       : `Wyeksportowano ${plural(lib.posts.length, 'post', 'posty', 'postów')} do pliku`,
       'ok',
     );

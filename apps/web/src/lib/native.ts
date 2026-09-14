@@ -26,19 +26,55 @@ export function consumeBack(): boolean {
 export interface SaveResult {
   where: 'native' | 'web';
   path?: string;
+  /** Gdzie realnie wylądował plik w APK — zależy od wersji Androida i zgód. */
+  label?: string;
 }
 
-/** Zapisuje plik biblioteki: w APK do Documents (potem udostępnianie), w sieci jako zwykły download. */
-export async function saveTextFile(name: string, text: string, mime = 'application/json'): Promise<SaveResult> {
-  if (isNative()) {
-    const written = await Filesystem.writeFile({ path: name, data: text, directory: Directory.Documents, recursive: true });
+/** To, czego potrzebujemy od pluginów — wstrzykiwalne, żeby dało się przetestować bez natywu. */
+export interface NativeFileIo {
+  write(opts: { path: string; data: string; directory: string; recursive: boolean }): Promise<{ uri?: string } | void>;
+  share(opts: { title: string; url: string; dialogTitle: string }): Promise<unknown>;
+}
+
+const defaultIo: NativeFileIo = {
+  write: (opts) => Filesystem.writeFile(opts as Parameters<typeof Filesystem.writeFile>[0]),
+  share: (opts) => Share.share(opts),
+};
+
+/**
+ * Kolejno probowane miejsca zapisu. `Documents` jest publiczne i wygodne (widać plik w menedżerze),
+ * ale od Androida 11 apka może w nim pisać tylko tam, gdzie sama coś już stworzyła — więc jak
+ * odmówi, spadamy do prywatnego katalogu aplikacji, gdzie zapis zawsze przechodzi.
+ */
+const NATIVE_TARGETS: Array<{ directory: string; label: string }> = [
+  { directory: Directory.Documents, label: 'Documents' },
+  { directory: Directory.Data, label: 'katalog aplikacji (Android/data/…)' },
+];
+
+/** Zapis w APK: Documents → (gdy odmówi) katalog apki, a do tego próba udostępnienia pliku. */
+export async function saveTextFileNative(name: string, text: string, io: NativeFileIo = defaultIo): Promise<SaveResult> {
+  let lastError: unknown = null;
+  for (const target of NATIVE_TARGETS) {
     try {
-      await Share.share({ title: name, url: written.uri ?? name, dialogTitle: 'Wyślij bibliotekę X-Offline' });
-    } catch {
-      /* użytkownik zamknął udostępnianie — plik i tak zapisany */
+      const written = await io.write({ path: name, data: text, directory: target.directory, recursive: true });
+      const path = written?.uri ?? `${target.label}/${name}`;
+      try {
+        await io.share({ title: name, url: path, dialogTitle: 'Wyślij bibliotekę X-Offline' });
+      } catch {
+        /* użytkownik zamknął udostępnianie — plik i tak zapisany */
+      }
+      return { where: 'native', path, label: target.label };
+    } catch (err) {
+      lastError = err;
     }
-    return { where: 'native', path: written.uri ?? `Documents/${name}` };
   }
+  const detail = lastError instanceof Error ? lastError.message : String(lastError ?? 'nieznany błąd');
+  throw new Error(`Nie udało się zapisać pliku w pamięci telefonu: ${detail}`);
+}
+
+/** Zapis pliku biblioteki: w APK przez saveTextFileNative (Documents → katalog apki), w sieci jako zwykły download. */
+export async function saveTextFile(name: string, text: string, mime = 'application/json'): Promise<SaveResult> {
+  if (isNative()) return await saveTextFileNative(name, text);
   const url = URL.createObjectURL(new Blob([text], { type: mime }));
   const a = document.createElement('a');
   a.href = url;

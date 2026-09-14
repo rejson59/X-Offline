@@ -18,7 +18,7 @@ Dwie wersje z tego samego kodu:
 | Wersja                        | Jak                                     | Co potrafi                                                                                  |
 | ----------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
 | **PWA** (przeglądarka) | `npm run dev` → podgląd, build → dowolny hosting | czyta cache, instaluje się „Dodaj do ekranu”, dociąga partie postów przez **proxy**, kolejka akcji czeka na wysyłkę |
-| **APK** (Android) | `npm run apk:build` albo GitHub Actions | + **logowanie do X w środku apki**, auto-zbieranie przy przewijaniu do celu, wysyłka polubień/zakładek, plik biblioteki w `Documents` |
+| **APK** (Android) | `npm run apk:build` albo GitHub Actions | + **logowanie do X w środku apki**, auto-zbieranie przy przewijaniu do celu, wysyłka polubień/zakładek, plik biblioteki na dysku telefonu |
 
 ```
 Start (oś czasu + akcje)  ·  Na żywo (X w aplikacji, auto-zapis, pobieranie)  ·  Zapisane (offline, czytnik)  ·  Ustawienia
@@ -65,7 +65,10 @@ Co konkretnie daje tryb offline:
 - **zdjęcia i klipy** ściągnięte jako binarki i wpięte przez `blob:` URL-e → zero żądań sieciowych przy czytaniu,
 - **service worker** cacheuje sam shell apki, więc „Dodaj do ekranu głównego” startuje bez łącza,
 - **limit miejsca + auto-czyszczenie**: apka nie urośnie Ci do 5 GB (domyślnie 256 MB, potem tnie najstarsze media),
-- **eksport/import biblioteki** do pliku `.json` — przenosisz zestaw postów na inny telefon (w APK ląduje w `Documents`).
+- **eksport/import biblioteki** do pliku `.json` — przenosisz zestaw postów na inny telefon. W APK apka najpierw
+  próbuje zapisać do publicznego `Documents`, a gdy Android 11+ nie pozwala (od API 30 wolno jej tylko pisać tam,
+  gdzie sama coś stworzyła), cicho spada do własnego katalogu `Android/data/app.xoffline.mobile/files/` i mówi
+  w toastzie, gdzie wylądował plik.
 
 ### Dlaczego w przeglądarce potrzebny jest proxy
 
@@ -96,7 +99,7 @@ Polecenia:
 
 ```bash
 npm run build        # apps/web/dist (PWA gotowe do wrzucenia na hosting)
-npm run test         # 48 testów: normalizacja, cache offline, limit miejsca, kolejka akcji, render UI
+npm run test         # 53 testy: normalizacja, cache offline, limit miejsca, kolejka akcji, eksport, render UI
 npm run typecheck
 npm run demo:gen     # regeneruje dane demo + media (scripts/gen-demo-data.mjs)
 npm run apk:build    # lokalny build debug-APK (wymaga JDK 21 + Android SDK)
@@ -147,7 +150,7 @@ apps/web/                 PWA + kod natywny (React 18, TS, Dexie, zustand, vite-
     media.ts             cache binarek w IndexedDB, limit miejsca, przycinanie
     download.ts          kolejka pobrań: postęp, anulowanie, współbieżność 3, historia
     posts.ts             zapis/unsave, merge przy ponownym pobraniu, eksport/import
-    native.ts            plik biblioteki w Documents, przycisk „wstecz”, cykl życia
+    native.ts            zapis pliku biblioteki (Documents → katalog apki), „wstecz”, cykl życia
   bridge.ts            mostek z natywnym podglądem X (XLive), dev-hook window.__xoffline
   capture.ts           polityka auto-zapisu (cel, priorytety, lustrzanka zakładek)
   autosync.ts          „dociągnij do 200” dla trybu proxy/demo

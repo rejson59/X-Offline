@@ -116,7 +116,7 @@ najpierw odinstaluj starą wersję.
 | -------------------------------- | -------------------------------- | ----------------------------------------------- |
 | pobieranie postów z X            | tylko przez proxy (CORS)         | **bez proxy** (`CapacitorHttp`)                 |
 | media offline                    | IndexedDB + Cache API             | IndexedDB (WebView ma własny przydział miejsca)  |
-| eksport biblioteki                | pobranie pliku                    | plik w `Documents/` + systemowe udostępnianie     |
+| eksport biblioteki                | pobranie pliku                    | plik na dysku (Documents albo katalog apki) + udostępnianie systemowe |
 | przycisk „wstecz”                 | —                                | zamyka czytnik / sheet, potem start, potem exit   |
 | aktualizacja apki                 | service worker (prompt w nagłówku) | reinstalacja APK (dane zostają)                 |
 
@@ -149,6 +149,14 @@ komentarzu + `docs/DANE.md`).
   źle nazwanym `@CapacitorPlugin`, niezbalansowanym XML-u i `getAssets()` wskazującym w pustkę).
 - **`chrome://inspect` nie widzi apki** → tak ma być w wariancie release: `webContentsDebuggingEnabled: false`
   w `capacitor.config.ts`. Debug-APK da się podglądać always (jest `debuggable`).
+- **Eksport wylądował w `Android/data/…/files`, a nie w `Documents`** → tak ma być na Androidzie 11+: aplikacja
+  może w publicznym `Documents` pisać tylko w plikach, które sama tam stworzyła. `saveTextFileNative` najpierw
+  próbuje `Directory.Documents`, przy odmowie zapisuje w `Directory.Data`, a toast pokazuje faktyczne miejsce.
+  Żeby FileProvider nie wywalił udostępniania z katalogu aplikacji, `res/xml/file_paths.xml` ma tam
+  `<files-path>` i `<external-files-path>` — `npm run verify:android` pilnuje, że każdy użyty `Directory.*` ma
+  swoje przykrycie (inaczej `Share` dostaje URI spoza providera i na telefonie leci `IllegalArgumentException`).
+- **Udostępnianie nie otwiera okna, a plik jest zapisany** → normalne dla `content://` z nowszego
+  `@capacitor/filesystem` (Share przyjmuje tylko `file://`); plik i tak leży na dysku, wyślij go menedżerem plików.
 - **`SDK location not found`** → `ANDROID_HOME` albo `android/local.properties`.
 - **`Unsupported class file major version`** → JDK za nowy/stary dla gradle; użyj JDK 21 (`java -version`).
 - **Biały ekran po instalacji** → brak `npm run build` przed `cap sync`; sprawdź `android/app/src/main/assets/public/index.html`.
