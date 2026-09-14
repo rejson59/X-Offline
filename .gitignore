@@ -1,0 +1,35 @@
+node_modules/
+dist/
+dist-ssr/
+coverage/
+.DS_Store
+*.local
+.env
+.env.*
+!.env.example
+
+# Android / Capacitor — generowane lokalnie, budowane w CI
+/android/
+/ios/
+.capacitor/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# duże pliki tymczasowe
+*.tmp
+.cache/
+
+# lokalne buildy
+/dist-apk/
+/out/
+x-offline-pwa.zip
+
+*.tsbuildinfo
+
+# kopię tych plików trzymamy w ci/ (patrz README → CI)
+# .github/workflows/*.yml dodaj sam: git add -f .github/workflows
+
+# workflowy trzymane w ci/ (patrz sekcja CI w README) — skopiuj je przez `npm run ci:install`
+/.github/workflows/

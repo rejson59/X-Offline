@@ -1,0 +1,35 @@
+name: Web CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Testy
+        run: npm run test
+      - name: Build produkcyjny (PWA)
+        run: npm run build
+      - name: Proxy — składnia i smoke
+        run: |
+          node --check server/index.js
+          node server/index.js & echo started
+          sleep 1.5
+          curl -fsS localhost:8787/api/health | tee health.json
+          kill %1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 14
