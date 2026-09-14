@@ -24,12 +24,13 @@ if [ ! -d android ]; then
   npx cap add android
 fi
 
-echo "→ kontrola projektu natywnego"
-npm run verify:android
-
 echo "→ build webu + synchronizacja"
 npm run build
 npx cap sync android
+
+# kontrola natywu celowo PO syncu: wtedy widać m.in. czy assets/public i inject/ są na miejscu
+echo "→ kontrola projektu natywnego"
+npm run verify:android
 
 if [ -z "${ANDROID_HOME:-}" ] && [ -z "${ANDROID_SDK_ROOT:-}" ]; then
   for c in "$HOME/Android/Sdk" "$HOME/Library/Android/sdk" /opt/android-sdk /usr/lib/android-sdk; do

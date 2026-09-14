@@ -5,6 +5,28 @@ Dwie drogi: **CI (zero narzędzi u Ciebie)** i **lokalnie**. Obie używają tego
 
 ## 1. GitHub Actions (rekomendowane)
 
+### Najszybsza droga: wklej workflow w przeglądarce (zero terminala)
+
+GitHub nie pozwala integracji/botowi dodawać plików w `.github/workflows/` — więc ten jeden plik
+wklejasz sam, raz. Potem APK wychodzi z dwóch kliknięć.
+
+1. Wejdź na **`github.com/<Twój login>/X-Offline/new/main?filename=.github/workflows/android.yml`**
+   ( ścieżka i nazwa pliku uzupełnią się same — nie zmieniaj ich).
+2. Wklej tam dokładną zawartość [`ci/android-quick.yml`](../ci/android-quick.yml)
+   (otwórz plik → ikona „Copy raw content", żeby nie przenieść numerów linii).
+3. **Commit directly to the `main` branch** → zapisz.
+4. Zakładka **Actions** → **Android APK** → **Run workflow** →
+   `branch: arena/01a09eef-x-offline` (albo `main`, gdy PR będzie już scalony), `variant: debug` → **Run workflow**.
+5. Po ~5–8 minutach: w podglądzie runa, na dole, sekcja **Artifacts** → **`x-offline-apk-debug`** → pobierz.
+   W środku archiwum jest `x-offline-debug.apk` — ten plik instalujesz na telefonie (pkt 3 niżej).
+
+Ten skrót buduje to samo co pełny `ci/android.yml`, tylko bez wysyłania na release i bez `x-offline-pwa.zip`.
+Jak wolisz wersję pełną (albo chcesz, żeby `npm run ci:install` sam podmienił plik), użyj komend pod tym.
+
+> Run padł? Otwórz run → czerwony krok → pokaż mi ostatnie ~30 linii logu (albo odpal
+> `gh run view <id> --log-failed`). Typowe przyczyny są w pkt 6.
+
+
 ```
 Repo → Actions → „Android APK” → Run workflow → variant: debug
 ```

@@ -58,15 +58,15 @@ jobs:
       - name: Build PWA (webDir dla Capacitora)
         run: npm run build
 
-      - name: Weryfikacja projektu natywnego (bez SDK)
-        run: npm run verify:android
-
       - name: Synchronizacja natywna (webDir + wstrzykiwane skrypty)
         run: |
           if [ ! -d android ]; then npx cap add android; fi
           npx cap sync android
           # po cap sync: własne zasoby (inject) muszą być ostatnie
           npm run native:sync
+
+      - name: Weryfikacja projektu natywnego (bez SDK)
+        run: npm run verify:android
 
       - name: Podpis release (opcjonalnie)
         if: ${{ github.event.inputs.variant == 'release' || startsWith(github.ref, 'refs/tags/v') }}

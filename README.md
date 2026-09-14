@@ -209,6 +209,11 @@ npm run ci:install     # kopiuje ci/*.yml → .github/workflows/
 git add -f .github/workflows && git commit -m "ci: workflowy" && git push
 ```
 
+Nie chcesz grzebać w terminalu? Wklej [`ci/android-quick.yml`](ci/android-quick.yml) jako
+`.github/workflows/android.yml` przez edytor na GitHubie (instrukcja krok po kroku w
+[`docs/APK.md`](docs/APK.md), pkt 1) — potem samo **Actions → Android APK → Run workflow** i plik APK
+z sekcji *Artifacts*.
+
 Dlaczego tak: token integracji, którego tu używam, nie ma uprawnienia `workflows` — GitHub odrzuca
 push zawierający pliki w `.github/workflows/`. U Ciebie to jedno `git add -f .github/workflows`.
 
