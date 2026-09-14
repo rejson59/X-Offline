@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280" viewBox="0 0 720 1280">
+<defs><linearGradient id="g" x1="0" y1="0" x2=".6" y2="1">
+<stop offset="0" stop-color="#04231c"/><stop offset="1" stop-color="#0c5544"/></linearGradient></defs>
+<rect width="720" height="1280" fill="url(#g)"/><circle cx="503" cy="501" r="113" fill="#2fd6a3" opacity="0.17">
+<animate attributeName="cx" values="239;628;89" dur="5146ms" repeatCount="indefinite"/>
+<animate attributeName="cy" values="309;5;507" dur="6689.8ms" repeatCount="indefinite"/>
+</circle><circle cx="198" cy="625" r="163" fill="#2fd6a3" opacity="0.18">
+<animate attributeName="cx" values="386;343;15" dur="4419ms" repeatCount="indefinite"/>
+<animate attributeName="cy" values="1019;155;1258" dur="5744.7ms" repeatCount="indefinite"/>
+</circle><circle cx="509" cy="488" r="155" fill="#2fd6a3" opacity="0.12">
+<animate attributeName="cx" values="486;196;135" dur="2891ms" repeatCount="indefinite"/>
+<animate attributeName="cy" values="329;942;1005" dur="3758.3ms" repeatCount="indefinite"/>
+</circle><circle cx="152" cy="778" r="111" fill="#2fd6a3" opacity="0.23">
+<animate attributeName="cx" values="411;622;354" dur="4925ms" repeatCount="indefinite"/>
+<animate attributeName="cy" values="717;253;854" dur="6402.5ms" repeatCount="indefinite"/>
+</circle><circle cx="157" cy="353" r="76" fill="#2fd6a3" opacity="0.16">
+<animate attributeName="cx" values="258;463;569" dur="4608ms" repeatCount="indefinite"/>
+<animate attributeName="cy" values="117;1196;1180" dur="5990.400000000001ms" repeatCount="indefinite"/>
+</circle>
+<rect x="43.199999999999996" y="537.6" width="633.6" height="166.4" rx="26" fill="#000" opacity=".42"/>
+<text x="360" y="640" text-anchor="middle" font-family="system-ui,sans-serif" font-size="52" font-weight="800" fill="#fff">KLIP</text>
+<g><rect x="43.199999999999996" y="1190.4" width="633.6" height="8" rx="4" fill="#fff" opacity=".25">
+<animate attributeName="opacity" values=".25;.6;.25" dur="2.2s" repeatCount="indefinite"/></rect></g>
+</svg>

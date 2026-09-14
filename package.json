@@ -1,0 +1,43 @@
+{
+  "name": "x-offline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "X-Offline \u2014 przegl\u0105darka post\u00f3w X z pe\u0142nym trybem offline (PWA + Android APK przez Capacitor)",
+  "workspaces": [
+    "apps/web",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,proxy -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:server": "npm run dev -w server",
+    "build": "npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w apps/web",
+    "test": "npm run test -w apps/web",
+    "preview": "npm run preview -w apps/web",
+    "demo:gen": "node scripts/gen-demo-data.mjs",
+    "cap:sync": "npm run build && npx cap sync android && npm run native:sync",
+    "cap:add:android": "npx cap add android",
+    "apk:debug": "cd android && ./gradlew assembleDebug",
+    "apk:build": "bash scripts/build-apk.sh",
+    "apk:ci": "bash scripts/apk-ci.sh",
+    "verify:android": "node scripts/verify-android.mjs",
+    "ci:install": "bash scripts/install-ci.sh",
+    "native:sync": "node scripts/sync-native-assets.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.2.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/cli": "^7.2.0",
+    "@capacitor/core": "^7.2.0",
+    "@capacitor/filesystem": "^7.0.0",
+    "@capacitor/share": "^7.0.0"
+  }
+}

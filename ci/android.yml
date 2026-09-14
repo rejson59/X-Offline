@@ -1,0 +1,145 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Wariant buildu'
+        required: true
+        default: 'debug'
+        type: choice
+        options: ['debug', 'release']
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22'
+  JAVA_VERSION: '21'
+  ANDROID_API: '35'
+
+jobs:
+  apk:
+    name: Buduj APK (${{ github.event.inputs.variant || 'release' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-${{ env.ANDROID_API }} build-tools;${{ env.ANDROID_API }}.0.0'
+
+      - name: Zależności npm
+        run: npm ci
+
+      - name: Testy + typecheck (żeby nie budować APK z błędami)
+        run: |
+          npm run typecheck
+          npm run test
+
+      - name: Build PWA (webDir dla Capacitora)
+        run: npm run build
+
+      - name: Synchronizacja natywna (webDir + wstrzykiwane skrypty)
+        run: |
+          if [ ! -d android ]; then npx cap add android; fi
+          npx cap sync android
+          # po cap sync: własne zasoby (inject) muszą być ostatnie
+          npm run native:sync
+
+      - name: Weryfikacja projektu natywnego (bez SDK)
+        run: npm run verify:android
+
+      - name: Podpis release (opcjonalnie)
+        if: ${{ github.event.inputs.variant == 'release' || startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "Brak secrets ANDROID_KEYSTORE_B64 — buduję release bez podpisu (assembleRelease)."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/keystore.properties
+          sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/' android/app/build.gradle || true
+
+      - name: Gradle build
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          VARIANT="${{ github.event.inputs.variant || 'release' }}"
+          if [ "$VARIANT" = 'debug' ]; then
+            ./gradlew assembleDebug --console=plain --no-daemon
+          else
+            ./gradlew assembleRelease bundleRelease --console=plain --no-daemon
+          fi
+
+      - name: Zbierz artefakty
+        run: |
+          mkdir -p out
+          VARIANT="${{ github.event.inputs.variant || 'release' }}"
+          if [ "$VARIANT" = 'debug' ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk out/x-offline-debug.apk
+          else
+            cp android/app/build/outputs/apk/release/app-release*.apk out/x-offline-release.apk || true
+            cp android/app/build/outputs/bundle/release/app-release.aab out/x-offline-release.aab || true
+          fi
+          cp -r apps/web/dist out/pwa
+          (cd out && zip -qr ../x-offline-pwa.zip pwa && rm -rf pwa)
+          ls -la out
+
+      - name: Artifact — APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-offline-apk-${{ github.event.inputs.variant || 'release' }}
+          path: |
+            out/*.apk
+            out/*.aab
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Artifact — PWA
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-offline-pwa
+          path: x-offline-pwa.zip
+          retention-days: 30
+
+      - name: Release na tagu
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.apk
+            out/*.aab
+            x-offline-pwa.zip
+          body: |
+            X-Offline — PWA (`x-offline-pwa.zip`) i instalator Android (`*.apk`).
+            APK w wariancie release może być niepodpisany, jeśli repo nie ma secrets
+            `ANDROID_KEYSTORE_*` — wtedy użyj artefaktu debug albo podpisz samodzielnie.

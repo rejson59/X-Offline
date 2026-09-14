@@ -1,0 +1,89 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch do zbudowania'
+        required: false
+        default: 'arena/01a09eef-x-offline'
+        type: string
+      variant:
+        description: 'debug = instaluje się od razu; release = potrzebne secrets ANDROID_KEYSTORE_*'
+        required: false
+        default: 'debug'
+        type: choice
+        options: ['debug', 'release']
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: APK (${{ inputs.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK (platform 35)
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Zależności, testy, build PWA
+        run: |
+          npm ci
+          npm run typecheck
+          npm run test
+          npm run build
+
+      - name: Synchronizacja Capacitora + skrypty wstrzykiwane
+        run: |
+          npx cap sync android
+          npm run native:sync
+
+      - name: Kontrola projektu natywnego
+        run: npm run verify:android   # zero ostrzeżeń dopiero po syncu
+
+      - name: Gradle build
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          if [ "${{ inputs.variant }}" = 'debug' ]; then
+            ./gradlew assembleDebug --console=plain --no-daemon
+          else
+            ./gradlew assembleRelease --console=plain --no-daemon
+          fi
+
+      - name: Zbierz APK
+        run: |
+          mkdir -p out
+          VARIANT="${{ inputs.variant }}"
+          SRC=$(find android/app/build/outputs/apk -name "*${VARIANT}*.apk" | head -1)
+          if [ -z "$SRC" ]; then echo "Gradle nie zwrócił APK" >&2; exit 1; fi
+          cp -v "$SRC" "out/x-offline-${VARIANT}.apk"
+          ls -la out
+
+      - name: Artifact do pobrania
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-offline-apk-${{ inputs.variant }}
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 30
