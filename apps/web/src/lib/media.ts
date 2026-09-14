@@ -126,30 +126,6 @@ export async function dropMediaFor(postIds: string[]): Promise<number> {
   return rows.reduce((s, r) => s + r.bytes, 0);
 }
 
-/** Rozwiązuje URL media: najpierw lokalny blob, potem zdalny (service worker i tak ma CacheFirst). */
-export async function resolveMediaUrl(item: MediaItem): Promise<{ src: string; local: boolean }> {
-  if (item.url.startsWith('/') || item.url.startsWith('data:') || item.url.startsWith('blob:')) {
-    return { src: item.url, local: true };
-  }
-  const row = await db.blobs.get(blobKey(item.url));
-  if (row) return { src: objectUrlFor(row.key, row.blob), local: true };
-  const posterRow = item.poster ? await db.blobs.get(blobKey(item.poster)) : undefined;
-  if (item.kind === 'image' && posterRow) return { src: objectUrlFor(posterRow.key, posterRow.blob), local: true };
-  return { src: proxiedRemote(item.url), local: false };
-}
-
-function proxiedRemote(url: string): string {
-  const { settings, hydrated } = useSettings.getState();
-  if (!hydrated) return url;
-  // Zdjęcia z pbs.twimg.com działają w <img> bez proxy; proxy tylko gdy ustawiono własny serwer
-  // i użytkownik chce je wymusić (np. żeby service worker nie musiał korzystać z CORS).
-  const base = (settings.proxyUrl || '').trim();
-  if (base && /twimg\.com/.test(url)) {
-    return `${base.replace(/\/$/, '')}/api/media?url=${encodeURIComponent(url)}`;
-  }
-  return url;
-}
-
 export async function estimateStorage(): Promise<{ usage: number; quota: number }> {
   if (!navigator.storage?.estimate) {
     const rows = await db.blobs.toArray();

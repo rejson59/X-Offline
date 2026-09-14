@@ -179,6 +179,16 @@ Wystarczy jednak, że odpalisz workflow, a dostaniesz gotowy plik.
 - **APK**: chcesz odbierać intenty `text/plain`/`view/*`? Dorzuć `intent-filters` w `android/app/src/main/AndroidManifest.xml`
   (snippet w `docs/APK.md`), a resztę zrobi już istniejąca ścieżka importu.
 
+## Co dalej (kolejność, która ma sens)
+
+1. **Prawdziwe profile**: wypal `npm run dev`, zostaw tryb `auto` — jeśli proxy w sandboxie/na hoście nie ma
+   egressu, przełącz na własny Worker (`cloudflare/worker.mjs`, 5 minut roboty) i pobieraj dowolne konta.
+2. **APK**: `npm run ci:install` → push → Actions → artefakt. Debug-APK jest w pełni używalne.
+3. **Share sheet w APK**: intenty z `docs/APK.md`, żeby „Udostępnij → X-Offline” działało natywnie.
+4. **Wideo**: `video.twimg.com` zwraca MP4 — cache już je obsługuje; jeśli chcesz HLS, trzeba dodać
+   `@capacitor/hls`-owy strumień albo `hls.js` (obecnie wyciągamy najlepsze MP4).
+5. **iOS**: `npx cap add ios` + Xcode; nic w kodzie nie jest specyficzne dla Androida poza manifestem.
+
 ## Licencja / zastrzeżenie
 
 Projekt nie jest powiązany z X Corp. Treści postów należą do ich autorów; pobieranie publicznych danych

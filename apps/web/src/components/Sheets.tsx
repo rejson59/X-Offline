@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { pushBackHandler } from '@/lib/native';
 import { useSettings } from '@/lib/store';
-import { useQueue } from '@/lib/download';
+import { jobHistory, useQueue } from '@/lib/download';
+import type { JobRow } from '@/lib/types';
 import { bytesLabel } from '@/lib/format';
 import { IconClose, IconDownload } from './Icons';
 
@@ -97,6 +98,10 @@ export function ImportSheet({ onClose }: { onClose: () => void }) {
 }
 
 export function QueueSheet({ onClose }: { onClose: () => void }) {
+  const [history, setHistory] = useState<JobRow[]>([]);
+  useEffect(() => {
+    void jobHistory().then(setHistory);
+  }, []);
   const tasks = useQueue((s) => s.tasks);
   const cancel = useQueue((s) => s.cancel);
   const cancelAll = useQueue((s) => s.cancelAll);
@@ -119,7 +124,25 @@ export function QueueSheet({ onClose }: { onClose: () => void }) {
         </div>
       }
     >
-      {!tasks.length ? <p className="dim small">Pusto. Wrzuć coś do pobrania z zakładki „Na żywo”.</p> : null}
+      {!tasks.length ? <p className="dim small">Brak aktywnych zadań. Wrzuć coś do pobrania z zakładki „Na żywo” albo z linków.</p> : null}
+
+      {history.length ? (
+        <>
+          <h3 style={{ margin: '16px 0 4px' }}>Historia w tej bazie</h3>
+          {history.map((j) => (
+            <div className="row tiny dim" key={j.id} style={{ justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <span className="grow">
+                <b className="small" style={{ color: 'var(--text)' }}>{j.label}</b>
+                <span> · {new Date(j.createdAt).toLocaleString('pl-PL', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</span>
+              </span>
+              <span>
+                {j.status === 'done' ? `✓ ${j.done}` : j.status === 'error' ? `✕ ${j.lastError?.slice(0, 40) ?? 'błąd'}` : j.status}
+                {j.bytes ? ` · ${bytesLabel(j.bytes)}` : ''}
+              </span>
+            </div>
+          ))}
+        </>
+      ) : null}
       {tasks.map((t) => {
         const pct = t.total ? Math.min(100, Math.round((t.done / t.total) * 100)) : 0;
         return (

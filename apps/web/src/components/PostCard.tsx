@@ -123,16 +123,16 @@ export function PostCard({
         {showStats ? (
           <>
             <span className="action">
-              <IconReply /> {post.stats.replies ? compactNum(post.stats.replies) : ''}
+              <IconReply /> {post.stats.replies ? compact(post.stats.replies) : ''}
             </span>
             <span className="action">
-              <IconRepost /> {post.stats.reposts ? compactNum(post.stats.reposts) : ''}
+              <IconRepost /> {post.stats.reposts ? compact(post.stats.reposts) : ''}
             </span>
             <span className="action">
-              <IconHeart /> {post.stats.likes ? compactNum(post.stats.likes) : ''}
+              <IconHeart /> {post.stats.likes ? compact(post.stats.likes) : ''}
             </span>
             <span className="action">
-              <IconChart /> {post.stats.views ? compactNum(post.stats.views) : ''}
+              <IconChart /> {post.stats.views ? compact(post.stats.views) : ''}
             </span>
           </>
         ) : (
@@ -150,7 +150,7 @@ export function PostCard({
   );
 }
 
-function compactNum(n: number): string {
+function compact(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1000000) return `${(n / 1000).toFixed(n < 10000 ? 1 : 0).replace(/\.0$/, '')}tys`;
   return `${(n / 1000000).toFixed(1)}mln`;

@@ -7,8 +7,6 @@ import type { MediaItem, PostRecord, PostSource } from './types';
 
 type Raw = Record<string, any>;
 
-const TWIMG = /^https?:\/\/(pbs\.twimg\.com|pic\.com|video\.twimg\.com|abs\.twimg\.com)/i;
-
 /** Publiczny token wymagany przez cdn.syndication.twimg.com/tweet-result. */
 export function syndicationToken(id: string): string {
   const n = Number(id);
@@ -244,11 +242,3 @@ export function normalizeTweets(
   return typeof opts.count === 'number' ? posts.slice(0, opts.count) : posts;
 }
 
-/** True, jeśli URL prowadzi na CDN X — używane przy decydowaniu, co da się pobrać bez proxy. */
-export function isXAsset(url: string): boolean {
-  return TWIMG.test(url);
-}
-
-export function proxyMediaUrl(url: string, apiBase: string): string {
-  return `${apiBase}/media?url=${encodeURIComponent(url)}`;
-}
