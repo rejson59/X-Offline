@@ -99,7 +99,7 @@ Polecenia:
 
 ```bash
 npm run build        # apps/web/dist (PWA gotowe do wrzucenia na hosting)
-npm run test         # 53 testy: normalizacja, cache offline, limit miejsca, kolejka akcji, eksport, render UI
+npm run test         # 53 testów: normalizacja, cache offline, limit miejsca, kolejka akcji, eksport, render UI
 npm run typecheck
 npm run demo:gen     # regeneruje dane demo + media (scripts/gen-demo-data.mjs)
 npm run apk:build    # lokalny build debug-APK (wymaga JDK 21 + Android SDK)
