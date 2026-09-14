@@ -6,7 +6,8 @@ import { pushBackHandler } from '@/lib/native';
 import { useSettings } from '@/lib/store';
 import type { PostRecord } from '@/lib/types';
 import { renderText } from './PostCard';
-import { IconBookmark, IconClose, IconExternal, IconShare } from './Icons';
+import { toggleBookmark, toggleLike } from '@/lib/actions';
+import { IconBookmarkFilled, IconClose, IconExternal, IconHeartFilled, IconQueue, IconShare } from './Icons';
 
 function ReelItem({
   post,
@@ -21,6 +22,14 @@ function ReelItem({
   const resolved = useResolvedMedia(media);
   const [playing, setPlaying] = useState(false);
   const toast = useSettings((s) => s.toast);
+
+  async function act(kind: 'like' | 'bookmark') {
+    const out = kind === 'like' ? await toggleLike(post) : await toggleBookmark(post);
+    toast(
+      `${kind === 'like' ? 'Polubienie' : 'Zakładka'}: ${out.kind.startsWith('un') ? 'cofnięte' : 'dodane'} — w kolejce do X`,
+      'info',
+    );
+  }
 
   const portrait = Boolean(media?.width && media?.height && media.height > media.width);
   const bgStyle = media ?
@@ -102,6 +111,22 @@ function ReelItem({
                 <IconExternal />
               </a>
             ) : null}
+            <button
+              className={`icon-btn${post.xLiked ? ' liked' : ''}`}
+              aria-label={post.xLiked ? 'Cofnij polubienie' : 'Polub (wyślemy później)'}
+              style={post.xLiked ? { color: 'var(--like)' } : undefined}
+              onClick={() => void act('like')}
+            >
+              <IconHeartFilled />
+            </button>
+            <button
+              className="icon-btn"
+              aria-label={post.xBookmarked ? 'Usuń z zakładek X' : 'Dodaj do zakładek X'}
+              style={post.xBookmarked ? { color: 'var(--accent)' } : undefined}
+              onClick={() => void act('bookmark')}
+            >
+              <IconBookmarkFilled />
+            </button>
             {post.savedAt ? (
               <button
                 className="icon-btn"
@@ -111,7 +136,7 @@ function ReelItem({
                   toast(`Usunięto z offline (${bytesLabel(freed)})`, 'info');
                 }}
               >
-                <IconBookmark />
+                <IconQueue />
               </button>
             ) : null}
           </div>

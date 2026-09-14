@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">X-Offline</string>
+    <string name="title_activity_main">X-Offline</string>
+    <string name="package_name">app.xoffline.mobile</string>
+    <string name="custom_url_scheme">app.xoffline.mobile</string>
+</resources>

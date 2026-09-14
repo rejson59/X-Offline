@@ -40,7 +40,8 @@ function pickVideoVariant(variants: Raw[] | undefined, preferHd: boolean): strin
 
 function mediaFrom(raw: Raw): MediaItem[] {
   const out: MediaItem[] = [];
-  const details: Raw[] = raw.mediaDetails ?? raw.extended_entities?.media ?? raw.entities?.media ?? [];
+  const details: Raw[] =
+    raw.mediaDetails ?? raw.extended_entities?.media ?? raw.entities?.media ?? raw.media?.all ?? [];
   for (const m of details) {
     const type = String(m.type ?? '').toLowerCase();
     const url: string | undefined = m.media_url_https ?? m.media_url ?? m.url;
@@ -114,7 +115,8 @@ function extractText(raw: Raw): string {
   const note = raw.note_tweet ?? raw.note_tweet_compat;
   const base: string =
     (typeof note?.text === 'string' ? note.text : undefined) ??
-    (typeof raw.text === 'string' ? raw.text : '') ??
+    (typeof raw.text === 'string' ? raw.text : undefined) ??
+    (typeof raw.full_text === 'string' ? raw.full_text : undefined) ??
     '';
   // Długie posty: syndykacja ucina na 280 znakach i wystawia `display_text_range`.
   if (typeof raw.article?.title === 'string') {
@@ -138,14 +140,19 @@ export interface NormalizedPost extends PostRecord {}
 
 export function normalizeTweet(raw: Raw, source: PostSource, fetchedFrom?: string): NormalizedPost | null {
   if (!raw || typeof raw !== 'object') return null;
-  const core: Raw = raw.tweet ?? raw.legacy ?? raw;
-  const id: string = String(core.id_str ?? core.id ?? '');
+  // Dwa światy: syndykacja (`tweet-result`) daje pola wprost, a GraphQL (x.com/i/api/graphql/…)
+  // pakuje tweeta w `result.legacy`, a autora w `result.core.user_results.result.legacy`.
+  const entry: Raw = raw.tweet ?? raw;
+  const core: Raw = entry.legacy ?? entry;
+  const coreUser: Raw = entry.core?.user_results?.result?.legacy ?? {};
+  const id: string = String(core.id_str ?? core.id ?? entry.rest_id ?? '');
   if (!id) return null;
-  const user: Raw = core.user ?? core.author ?? core.__raw__?.core?.user_results?.result?.legacy ?? {};
+  const user: Raw = core.user ?? core.author ?? coreUser;
   const handle: string = String(user.screen_name ?? user.username ?? fetchedFrom ?? 'x');
   const text = extractText(core);
-  if (!text && !(core.mediaDetails?.length || core.photos?.length)) return null;
-  const created = core.created_at ?? core.created_at_millis;
+  const media = mediaFrom(core);
+  if (!text && !media.length) return null;
+  const created = core.created_at ?? core.created_at_millis ?? core.created_at_epoch_ms;
   const createdAt =
     typeof created === 'number' ? created : created ? Date.parse(String(created)) : Date.now();
   const userMentions: Raw[] = core.entities?.user_mentions ?? [];
@@ -171,9 +178,12 @@ export function normalizeTweet(raw: Raw, source: PostSource, fetchedFrom?: strin
       likes: num(core.favorite_count),
       views: core.views?.count ? num(core.views.count) : undefined,
     },
-    media: mediaFrom(core),
+    media,
     card: cardFrom(core),
     isReply: Boolean(core.in_reply_to_status_id_str && !core.self_thread),
+    // Stan sesji użytkownika — widać go tylko w zalogowanym podglądzie (GraphQL).
+    xLiked: Boolean(core.favorited ?? false),
+    xBookmarked: Boolean(core.bookmarked ?? false),
     retweetedBy: core.retweeted_status_result
       ? String(core.retweeted_status_result.user?.name ?? '')
       : undefined,
@@ -188,6 +198,9 @@ export function extractTweetList(payload: unknown): Raw[] {
   const p = payload as Raw;
   if (!p) return [];
   if (Array.isArray(p)) return p as Raw[];
+  // Wstrzyknięty zbieracz w WebView pakuje posty w { source, tweets: [...] }.
+  if (Array.isArray(p.tweets)) return p.tweets as Raw[];
+  if (Array.isArray(p.entries?.entries)) return p.entries.entries.map((e: Raw) => e?.content?.tweet ?? e).filter(Boolean);
   if (Array.isArray(p.timeline)) return p.timeline.map((e: Raw) => e?.content?.tweet ?? e).filter(Boolean);
   if (Array.isArray(p.entries)) return p.entries.map((e: Raw) => e?.content?.tweet ?? e).filter(Boolean);
   const tl = p.props?.pageProps?.timeline?.entries;

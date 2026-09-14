@@ -7,12 +7,14 @@ import { HomeTab } from './components/HomeTab';
 import { OfflineTab } from './components/OfflineTab';
 import { LiveTab } from './components/LiveTab';
 import { SettingsTab } from './components/SettingsTab';
-import { ImportSheet, QueueSheet, Toasts } from './components/Sheets';
+import { ActionsSheet, ImportSheet, QueueSheet, Toasts } from './components/Sheets';
+import { useActionList } from './lib/actionsView';
 import {
   IconBookmark,
   IconDownload,
   IconHome,
   IconLive,
+  IconQueue,
   IconSettings,
   IconWifiOff,
   IconX,
@@ -38,6 +40,8 @@ export function App() {
   const install = usePwa((s) => s.install);
   const offlineReady = usePwa((s) => s.offlineReady);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const { stats } = useActionList();
   const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
@@ -68,6 +72,37 @@ export function App() {
             {plural(savedCount, 'post', 'posty', 'postów')}
           </span>
         ) : null}
+
+        <button
+          className="icon-btn"
+          onClick={() => setActionsOpen(true)}
+          aria-label={`Kolejka akcji do X (${stats.pending} czeka)`}
+          title="Polubienia i zakładki czekające na wysyłkę"
+          style={{ position: 'relative' }}
+        >
+          <IconQueue />
+          {stats.pending ? (
+            <span
+              style={{
+                position: 'absolute',
+                top: 0,
+                right: 0,
+                minWidth: 16,
+                height: 16,
+                borderRadius: 999,
+                background: stats.error ? 'var(--err)' : 'var(--accent)',
+                color: '#fff',
+                fontSize: 10,
+                fontWeight: 800,
+                display: 'grid',
+                placeItems: 'center',
+                padding: '0 3px',
+              }}
+            >
+              {stats.pending}
+            </span>
+          ) : null}
+        </button>
 
         {canInstall ? (
           <button
@@ -127,6 +162,7 @@ export function App() {
 
       {queueOpen ? <QueueSheet onClose={() => setQueueOpen(false)} /> : null}
       {importOpen ? <ImportSheet onClose={() => setImportOpen(false)} /> : null}
+      {actionsOpen ? <ActionsSheet onClose={() => setActionsOpen(false)} /> : null}
 
       <Toasts />
     </div>

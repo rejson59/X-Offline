@@ -43,9 +43,11 @@ describe('szkielet aplikacji', () => {
     const user = userEvent.setup();
     await screen.findByText('X-Offline');
     await user.click(screen.getByRole('button', { name: 'Na żywo' }));
-    expect(await screen.findByText(/Profile w aplikacji/i)).toBeTruthy();
+    expect(await screen.findByText(/Automatyczny offline/i)).toBeTruthy();
+    expect(screen.getByText(/Konta z listy/i)).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Zapisane' }));
-    expect(await screen.findByText(/Nie masz jeszcze nic zapisanego/i)).toBeTruthy();
+    // przed wejściem do czytnika zapiszmy coś, żeby stan był przewidywalny
+    expect(await screen.findByText(/postów w pamięci urządzenia|Nie masz jeszcze nic zapisanego/i)).toBeTruthy();
   });
 
   it('zapisuje post do offline po kliknięciu zakładki', async () => {

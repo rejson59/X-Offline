@@ -1,17 +1,27 @@
 # X-Offline
 
-Mobilna apkka w stylu X (Twitter), w której **posty zapisujesz do pamięci urządzenia i czytasz je potem bez internetu
-albo na słabym łączu** — dokładnie tak, jak TikTok pozwala oglądać pobrane filmiki.
+Mobilna apkka w stylu X (Twitter), w której **posty same lądują w pamięci urządzenia i czytasz je potem bez internetu**
+— dokładnie tak, jak TikTok pozwala oglądać pobrane filmiki.
+
+Jak z tego korzystać (to jest cały flow):
+
+1. **Logujesz się do X normalnie** — w APK podgląd X to pełnoekranowy WebView z Twoimi ciasteczkami, więc
+   sesja działa tak jak w przeglądarce (`docs/NATYWNE.md`).
+2. **Nie wybierasz postów.** Apka sama zbiera to, co mija Twój wzrok, i dociąga partiami, aż uzbiera cel
+   (domyślnie **200 postów offline**). Auto-scroll robi to nawet wtedy, gdy odłożysz telefon.
+3. **Zakładki X są lustrzane** — to, co zapiszesz w samym X, wskakuje do offline; działa też na odwrót
+   (opcjonalnie: zapis w apce = kliknięta zakładka w X).
+4. **Polubienia i zakładki kliknięte offline czekają w kolejce** i lecą do X, gdy tylko złapiesz łącze.
 
 Dwie wersje z tego samego kodu:
 
 | Wersja                        | Jak                                     | Co potrafi                                                                                  |
 | ----------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-| **PWA** (przeglądarka)        | `npm run dev` → podgląd, albo build → netlify/vercel/static | czyta cache, instaluje się „Dodaj do ekranu głównego”, pobiera przez **serwer proxy** |
-| **APK** (Android)             | `npm run apk:build` albo GitHub Actions  | to samo + **pobiera posty bez żadnego serwera** (sieć natywna nie zna CORS)                 |
+| **PWA** (przeglądarka) | `npm run dev` → podgląd, build → dowolny hosting | czyta cache, instaluje się „Dodaj do ekranu”, dociąga partie postów przez **proxy**, kolejka akcji czeka na wysyłkę |
+| **APK** (Android) | `npm run apk:build` albo GitHub Actions | + **logowanie do X w środku apki**, auto-zbieranie przy przewijaniu do celu, wysyłka polubień/zakładek, plik biblioteki w `Documents` |
 
 ```
-Start (oś czasu)  ·  Na żywo (pobieranie + iframe X)  ·  Zapisane (offline)  ·  Ustawienia
+Start (oś czasu + akcje)  ·  Na żywo (X w aplikacji, auto-zapis, pobieranie)  ·  Zapisane (offline, czytnik)  ·  Ustawienia
 ```
 
 ---
@@ -22,6 +32,15 @@ Oficjalne API X jest płatne, więc idziemy inną drogą — tą samą, której 
 setkach stron:
 
 ```
+   ——— APK: Twoja sesja w XLiveActivity ———
+   x.com/home w WebView + wstrzyknięty zbieracz (assets/inject/xoffline-capture.js)
+        │   podsłuch /i/api/graphql/* → pełne tweety (autor, media, favorited, bookmarked)
+        │   auto-scroll do celu („200 postów”), widżet z licznikiem i pauzą
+        │   odtwarzanie akcji: kliknij [data-testid=like|bookmark] w prawdziwym UI
+        ▼
+   bridge.ts → capture.ts (polityka: co zapisywać, kiedy stanąć) → Dexie + blobs
+        ▲
+   ——— PWA / fallback bez logowania ———
    X (publiczne endpointy syndykacji)
         │   cdn.syndication.twimg.com/tweet-result?id=…&token=…      ← pojedynczy post
         │   cdn.syndication.twimg.com/timeline/profile?screen_name=… ← ostatnie posty profilu
@@ -102,6 +121,17 @@ Plik APK waży ~4 MB (Capacitor + WebView, bez Google Mobile Services). Minimaln
 
 ---
 
+## Testowanie bez prawdziwego X
+
+```js
+// w konsoli apki — wrzuć cokolwiek w kształcie GraphQL albo { tweets: [...] } prosto do bazy:
+await window.__xoffline.ingest(JSON.stringify({ tweets: [/* … */] }));
+```
+
+W podglądzie X (APK, chrome://inspect): `window.__xofflineStatus()` pokaże, ile zebrano i dlaczego
+ewentualnie stanęło; `window.__xofflineReplay('[{"id":1,"kind":"like","tweetId":"…","tweetUrl":"https://x.com/…/status/…"}]')`
+odtwarza akcje ręcznie.
+
 ## Struktura repo
 
 ```
@@ -114,6 +144,10 @@ apps/web/                 PWA + kod natywny (React 18, TS, Dexie, zustand, vite-
     download.ts          kolejka pobrań: postęp, anulowanie, współbieżność 3, historia
     posts.ts             zapis/unsave, merge przy ponownym pobraniu, eksport/import
     native.ts            plik biblioteki w Documents, przycisk „wstecz”, cykl życia
+  bridge.ts            mostek z natywnym podglądem X (XLive), dev-hook window.__xoffline
+  capture.ts           polityka auto-zapisu (cel, priorytety, lustrzanka zakładek)
+  autosync.ts          „dociągnij do 200” dla trybu proxy/demo
+  actions.ts           kolejka polubień/zakładek: pending → sending → sent / error
   src/db/db.ts           schemat Dexie (posts / blobs / accounts / jobs / meta)
   src/components/        HomeTab, LiveTab, OfflineTab, SettingsTab, Reel, Sheets, PostCard…
 server/index.js          proxy node (tylko-do-czytania, allow-lista hostów, TTL cache, rate limit)
@@ -135,15 +169,29 @@ docs/DANE.md             endpointy, ograniczenia, co zrobić gdy X coś zmieni
 | Pionowy czytnik              | wł.       | tapnięcie posta otwiera szpulkę ze swipe’em w górę/dół              |
 | Aktualizuj przy starcie      | wył.      | przy otworzeniu apki dociąga świeże posty profili, które masz      |
 | Szablon podglądu na żywo     | `…/{handle}` | własna strona w ramce (np. instancja lustrzana, której ufasz)  |
+| Do ilu postów dokarmiać      | 200       | cel auto-zapisu; jak go osiągniesz, zbieranie staje                |
+| Auto-zapis napotkanych postów| wł.       | każdy post minięty w podglądzie X ląduje w offline                |
+| Auto-przewijanie podglądu     | wł.       | apka sama scrolluje, żeby zebrać partię (pauzuje, gdy ruszysz)     |
+| Partia przy scrollu          | 8 ekranów | ile ekranów na jedną rundę zbierania                               |
+| Lustrzanka zakładek X        | wł.       | to, co zapiszesz w X, trafia do offline (priorytet ponad cel)      |
+| Nasze zapisy → zakładki X    | wył.      | odwrotność: zapis w apce klika zakładkę w X                         |
+| Wysyłaj zaległe akcje        | wł.       | polubienia/zakładki kliknięte offline lecą, gdy wróci łącze (APK)   |
+| Media tylko na Wi-Fi         | wył.      | przy mobile tylko tekst, zdjęcia i klipy doładujesz na sieci       |
 
 ## Czego ta apka **nie** robi (i nie będzie)
 
-- nie loguje Cię do X, nie czyta Twojej osi czasu „home”, nie pobiera DM-ów i postów z kont prywatnych,
-- nie zapisuje wątków i odpowiedzi (zgodnie z założeniem: tylko główne posty),
+- **w przeglądarce** nie loguje Cię do X (sesja zostaje na x.com) — logowanie z auto-zbieraniem jest w APK,
+- nie czyta DM-ów i nie wchodzi w posty kont prywatnych poza tym, co sama widzisz na ekranie,
+- nie zapisuje wątków i odpowiedzi (tylko główne posty), nie klika nic „w Twoim imieniu” poza kolejką,
+  którą sam napełnisz (polubienia / zakładki),
 - nie działa z pełną gwarancją: endpointy syndykacji są **nieoficjalne**, dawkowane i mogą zniknąć — wtedy
   apka nadal czyta to, co już masz w pamięci (i to jest cały sens offline-first).
 
-Szczegóły i plan B: [`docs/DANE.md`](docs/DANE.md).
+Szczegóły i plan B: [`docs/DANE.md`](docs/DANE.md), a architektura natywna: [`docs/NATYWNE.md`](docs/NATYWNE.md).
+
+> **Uczciwie:** klikanie przycisków skryptem to automatyzacja konta, a regulamin X jej nie lubi.
+> Domyślnie apka klika tylko to, co sam kliknąłeś offline (kilka–kilkadziesiąt akcji), a całość
+> wyłączysz jednym suwakiem: *Ustawienia → Wysyłaj zaległe akcje przy łączu*.
 
 ---
 
@@ -184,10 +232,13 @@ Wystarczy jednak, że odpalisz workflow, a dostaniesz gotowy plik.
 1. **Prawdziwe profile**: wypal `npm run dev`, zostaw tryb `auto` — jeśli proxy w sandboxie/na hoście nie ma
    egressu, przełącz na własny Worker (`cloudflare/worker.mjs`, 5 minut roboty) i pobieraj dowolne konta.
 2. **APK**: `npm run ci:install` → push → Actions → artefakt. Debug-APK jest w pełni używalne.
-3. **Share sheet w APK**: intenty z `docs/APK.md`, żeby „Udostępnij → X-Offline” działało natywnie.
-4. **Wideo**: `video.twimg.com` zwraca MP4 — cache już je obsługuje; jeśli chcesz HLS, trzeba dodać
+3. **Share sheet w APK**: `share_target` w manifeście działa; natywne intenty (`text/plain`) — snippet w `docs/APK.md`.
+4. **Twarde testy natywne**: odpal debug-APK i sprawdź `window.__xofflineStatus()` w chrome://inspect —
+   jak X zmieni DOM, to tam zobaczysz, że zbieracz stanął.
+5. **Wideo**: `video.twimg.com` zwraca MP4 — cache już je obsługuje; jeśli chcesz HLS, trzeba dodać
    `@capacitor/hls`-owy strumień albo `hls.js` (obecnie wyciągamy najlepsze MP4).
-5. **iOS**: `npx cap add ios` + Xcode; nic w kodzie nie jest specyficzne dla Androida poza manifestem.
+6. **iOS**: `npx cap add ios` + Xcode; brakuje tylko ekwiwalentu `XLiveActivity` (`WKUserScript` +
+   `WKScriptMessageHandler`) — reszta jest w TypeScriptie, patrz `docs/NATYWNE.md`.
 
 ## Licencja / zastrzeżenie
 

@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { AccountRow, BlobRow, JobRow, PostRecord, Settings } from '@/lib/types';
+import type { AccountRow, ActionRow, BlobRow, JobRow, PostRecord, Settings } from '@/lib/types';
 import { DEFAULT_SETTINGS } from '@/lib/types';
 
 interface MetaRow {
@@ -13,6 +13,7 @@ class XOfflineDB extends Dexie {
   accounts!: Table<AccountRow, string>;
   jobs!: Table<JobRow, number>;
   meta!: Table<MetaRow, string>;
+  actions!: Table<ActionRow, number>;
 
   constructor() {
     super('x-offline');
@@ -23,6 +24,10 @@ class XOfflineDB extends Dexie {
       accounts: '&handle, lastSyncAt',
       jobs: '++id, status, createdAt',
       meta: '&key',
+    });
+    // v2: kolejka akcji do odtworzenia w X (polubienia / zakładki) + licznik błędów przy postach.
+    this.version(2).stores({
+      actions: '++id, status, kind, tweetId, createdAt, sentAt',
     });
   }
 }

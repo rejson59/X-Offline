@@ -11,6 +11,13 @@ import { refreshAccountCounts, saveOffline } from './lib/posts';
 import { tweetIdFromUrl } from './lib/normalize';
 import { db } from './db/db';
 import { initNativeBridges } from './lib/native';
+import { bridge } from './lib/bridge';
+import { maybeReplay } from './lib/actions';
+import { shouldAutoFillOnOpen, useFill } from './lib/autosync';
+
+function toast0(text: string): void {
+  useSettings.getState().toast(text, 'info');
+}
 
 async function boot(): Promise<void> {
   const settings = useSettings.getState();
@@ -22,6 +29,18 @@ async function boot(): Promise<void> {
   initNativeBridges(() => {
     void refreshAccountCounts();
     void useQueue.getState().refreshTotals();
+    void maybeReplay();
+  });
+
+  // Mostek z natywnym podglądem X: posty przy przewijaniu lecą prosto do offline.
+  bridge.installDevHook();
+  await bridge.startCapturing();
+
+  // Łącze wróciło? Wyślij, co czekało.
+  window.addEventListener('online', () => {
+    void maybeReplay().then((r) => {
+      if (r.sent) settings.toast(`Wysłane do X: ${r.sent} akcji`, 'ok');
+    });
   });
   settings.refreshNet();
 
@@ -53,6 +72,12 @@ async function boot(): Promise<void> {
       settings.toast(`Z udostępniania: ${links.length} linków w kolejce`, 'ok');
     }
     history.replaceState({}, '', location.pathname);
+  }
+
+  // 3) Auto-dokarmianie offline przy starcie (żeby rano w pociągu było co czytać).
+  if (await shouldAutoFillOnOpen()) {
+    toast0('Dociągam partię postów do offline…');
+    void useFill.getState().start();
   }
 
   const tab = params.get('tab');

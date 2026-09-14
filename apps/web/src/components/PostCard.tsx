@@ -1,12 +1,22 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useResolvedMedia } from '@/hooks/useResolvedMedia';
 import { avatarColor, bytesLabel, initials, relativeTime, segmentText } from '@/lib/format';
 import { saveOffline, unsavePosts } from '@/lib/posts';
+import { hasPendingFor, toggleBookmark, toggleLike } from '@/lib/actions';
 import { plural } from '@/lib/format';
 import { useSettings } from '@/lib/store';
 import type { PostRecord } from '@/lib/types';
 import { MediaGrid } from './MediaGrid';
-import { IconBookmark, IconBookmarkOutline, IconChart, IconHeart, IconReply, IconRepost, IconSpinner } from './Icons';
+import {
+  IconBookmark,
+  IconBookmarkFilled,
+  IconCloud,
+  IconHeart,
+  IconHeartFilled,
+  IconReply,
+  IconRepost,
+  IconSpinner,
+} from './Icons';
 
 function Avatar({ post }: { post: PostRecord }) {
   const { src } = useResolvedMedia(post.authorAvatar ? { kind: 'image', url: post.authorAvatar } : undefined);
@@ -49,8 +59,29 @@ export function PostCard({
   showStats?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const [actBusy, setActBusy] = useState<'like' | 'bookmark' | null>(null);
+  const [queued, setQueued] = useState(false);
   const toast = useSettings((s) => s.toast);
   const saved = Boolean(post.savedAt);
+
+  useEffect(() => {
+    void hasPendingFor(post.id).then((row) => setQueued(Boolean(row)));
+  }, [post.xLiked, post.xBookmarked, post.id, actBusy]);
+
+  async function act(kind: 'like' | 'bookmark') {
+    if (actBusy) return;
+    setActBusy(kind);
+    try {
+      const out = kind === 'like' ? await toggleLike(post) : await toggleBookmark(post);
+      const label = kind === 'like' ? (out.kind === 'like' ? 'Polubienie' : 'Cofnięte polubienie') : out.kind === 'bookmark' ? 'Zakładka' : 'Usunięta zakładka';
+      toast(`${label} — w kolejce do wysłania, gdy będzie łącze`, 'info');
+      setQueued(true);
+    } catch (err) {
+      toast(`Nie udało się: ${(err as Error).message}`, 'error');
+    } finally {
+      setActBusy(null);
+    }
+  }
 
   async function toggle(e: React.MouseEvent) {
     e.stopPropagation();
@@ -120,30 +151,44 @@ export function PostCard({
       ) : null}
 
       <footer className="post-actions">
-        {showStats ? (
-          <>
-            <span className="action">
-              <IconReply /> {post.stats.replies ? compact(post.stats.replies) : ''}
-            </span>
-            <span className="action">
-              <IconRepost /> {post.stats.reposts ? compact(post.stats.reposts) : ''}
-            </span>
-            <span className="action">
-              <IconHeart /> {post.stats.likes ? compact(post.stats.likes) : ''}
-            </span>
-            <span className="action">
-              <IconChart /> {post.stats.views ? compact(post.stats.views) : ''}
-            </span>
-          </>
-        ) : (
-          <span className="tiny dim">
-            {saved ? `zapisano ${relativeTime(post.savedAt ?? 0)}` : 'niezapisane'}
-            {post.sizeBytes ? ` · ${bytesLabel(post.sizeBytes)}` : ''}
-          </span>
-        )}
-        <button type="button" className={`action save${saved ? ' saved' : ''}${busy ? ' busy' : ''}`} onClick={toggle}>
-          {busy ? <IconSpinner /> : saved ? <IconBookmark /> : <IconBookmarkOutline />}
-          <span className="tiny">{busy ? 'zapisywanie…' : saved ? 'w offline' : 'zapisz'}</span>
+        <span className="action" title="Odpowiedzi">
+          <IconReply /> {showStats && post.stats.replies ? compact(post.stats.replies) : ''}
+        </span>
+        <span className="action" title="Podbicia">
+          <IconRepost /> {showStats && post.stats.reposts ? compact(post.stats.reposts) : ''}
+        </span>
+        <button
+          type="button"
+          className={`action like${post.xLiked ? ' on' : ''}${actBusy === 'like' ? ' busy' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            void act('like');
+          }}
+          title={post.xLiked ? 'Cofnij polubienie' : 'Polub (wyślemy, gdy będzie łącze)'}
+        >
+          {actBusy === 'like' ? <IconSpinner /> : post.xLiked ? <IconHeartFilled /> : <IconHeart />}
+          {showStats && post.stats.likes ? compact(post.stats.likes) : ''}
+        </button>
+        <button
+          type="button"
+          className={`action like${post.xBookmarked ? ' on' : ''}${actBusy === 'bookmark' ? ' busy' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            void act('bookmark');
+          }}
+          title={post.xBookmarked ? 'Usuń z zakładek X' : 'Dodaj do zakładek X (i do offline)'}
+        >
+          {actBusy === 'bookmark' ? <IconSpinner /> : post.xBookmarked ? <IconBookmarkFilled /> : <IconBookmark />}
+        </button>
+        <button
+          type="button"
+          className={`action save${saved ? ' saved' : ''}${busy ? ' busy' : ''}`}
+          onClick={toggle}
+          title={saved ? 'Usuń z offline' : 'Zapisz do czytania bez internetu'}
+        >
+          {busy ? <IconSpinner /> : <IconCloud />}
+          <span className="tiny">{busy ? 'zapisywanie…' : saved ? 'offline' : 'offline'}</span>
+          {queued ? <span className="pill" style={{ padding: '1px 6px' }}>w kolejce</span> : null}
         </button>
       </footer>
     </article>

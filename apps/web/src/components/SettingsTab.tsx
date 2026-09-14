@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/db';
 import { useSettings } from '@/lib/store';
 import { useQueue } from '@/lib/download';
 import { estimateStorage, pruneToCap, revokeAllObjectUrls } from '@/lib/media';
 import { exportLibrary, importLibrary, unsavePosts } from '@/lib/posts';
+import { maybeReplay, retryErrors } from '@/lib/actions';
+import { useActionList } from '@/lib/actionsView';
+import { useFill } from '@/lib/autosync';
 import { libraryFileName, saveTextFile } from '@/lib/native';
 import { resetDemo, demoGeneratedAt } from '@/lib/demo';
 import { isNative, probeProxy } from '@/lib/transport';
@@ -52,6 +55,13 @@ export function SettingsTab() {
   const storage = useLiveQuery(() => estimateStorage(), [], { usage: 0, quota: 0 });
   const accounts = useLiveQuery(() => db.accounts.toArray(), [], []);
   const jobs = useLiveQuery(() => db.jobs.orderBy('createdAt').reverse().limit(8).toArray(), [], []);
+  const { stats: actStats } = useActionList();
+  const fill = useFill();
+  const parsedHandles = useMemo(
+    () =>
+      [...new Set((settings.followList || '').split(/[\s,;\n]+/).map((h) => h.trim().replace(/^@/, '')).filter((h) => /^[A-Za-z0-9_]{1,15}$/.test(h)))],
+    [settings.followList],
+  );
 
   useEffect(() => {
     void probeProxy().then((r) =>
@@ -124,6 +134,117 @@ export function SettingsTab() {
         status: <span className={proxy.ok ? '' : 'dim'}>{proxy.note}</span>
         {isNative() ? ' · w tej wersji aplikacji natywnej proxy jest opcjonalne' : ''}
       </div>
+
+      <h2>Auto-offline i akcje</h2>
+      <p className="lede">
+        Zero klikania po posty: apka sama dokarmia czytnik — w APK tym, co przewijasz w podglądzie X, a w przeglądarce
+        partiami z listy kont. Polubienia i zakładki kliknięte offline czekają w kolejce i lecą, gdy wróci łącze.
+      </p>
+
+      <h3>Do ilu postów dokarmiać offline</h3>
+      <div className="chips" style={{ paddingInline: 0 }}>
+        {[50, 100, 200, 300, 500].map((n) => (
+          <button key={n} className="chip" aria-pressed={settings.autoTarget === n} onClick={() => set('autoTarget', n)}>
+            {n}
+          </button>
+        ))}
+      </div>
+      <h3>Partia przy auto-przewijaniu</h3>
+      <div className="chips" style={{ paddingInline: 0 }}>
+        {[4, 8, 16, 24].map((n) => (
+          <button key={n} className="chip" aria-pressed={settings.scrollBatch === n} onClick={() => set('scrollBatch', n)}>
+            {n} ekranów
+          </button>
+        ))}
+      </div>
+
+      <div className="list">
+        <Toggle
+          label="Auto-zapis napotkanych postów"
+          hint="Każdy post, który miniesz w podglądzie X, ląduje w offline (do limitu wyżej)."
+          checked={settings.autoCapture}
+          onChange={(v) => set('autoCapture', v)}
+        />
+        <Toggle
+          label="Auto-przewijanie podglądu"
+          hint="Apka sama przewija feed, żeby nazbierać partię — zatrzymuje się na limicie."
+          checked={settings.autoScroll}
+          onChange={(v) => set('autoScroll', v)}
+        />
+        <Toggle
+          label="Lustrzanka zakładek X"
+          hint="To, co zapiszesz w zakładkach samego X, trafia do offline przy najbliższym podglądzie."
+          checked={settings.mirrorBookmarks}
+          onChange={(v) => set('mirrorBookmarks', v)}
+        />
+        <Toggle
+          label="Nasze zapisy → zakładki X"
+          hint="Odwrotność: zapisanie posta w X-Offline dodaje mu też zakładkę w X (gdy będzie łącze). Domyślnie wyłączone, żeby nie zaśmiecać konta."
+          checked={settings.mirrorToBookmarks}
+          onChange={(v) => set('mirrorToBookmarks', v)}
+        />
+        <Toggle
+          label="Wysyłaj zaległe akcje przy łączu"
+          hint={`Kolejka: ${actStats.pending} czeka · ${actStats.error} z błędem · ${actStats.sent} wysłanych. Wymaga sesji X w APK.`}
+          checked={settings.replayActions}
+          onChange={(v) => set('replayActions', v)}
+        />
+        <Toggle
+          label="Media tylko na Wi-Fi"
+          hint="Przy mobilnym łączu zapisujemy sam tekst, zdjęcia i klipy doładujemy na sieci."
+          checked={settings.mediaOnWifiOnly}
+          onChange={(v) => set('mediaOnWifiOnly', v)}
+        />
+        <Toggle
+          label="Przytnij nadmiar ponad cel"
+          hint="Gdy offline urośnie ponad autoTarget, zrzucamy media najstarszych postów."
+          checked={settings.trimOverTarget}
+          onChange={(v) => set('trimOverTarget', v)}
+        />
+      </div>
+
+      <div className="row" style={{ marginTop: 10, flexWrap: 'wrap', gap: 8 }}>
+        <button
+          className="btn primary small grow"
+          disabled={fill.running}
+          onClick={() => void fill.start()}
+        >
+          {fill.running ? `Dociągam… ${fill.saved}/${fill.target}` : `Dociągnij do ${settings.autoTarget} teraz`}
+        </button>
+        <button
+          className="btn ghost small grow"
+          disabled={!actStats.pending}
+          onClick={async () => {
+            const r = await maybeReplay();
+            toast(r.sent ? `Wysłane: ${r.sent}` : `Czekają: ${r.reason ?? 'brak akcji'}`, r.sent ? 'ok' : 'warn');
+          }}
+        >
+          Wyślij akcje ({actStats.pending})
+        </button>
+        {actStats.error ? (
+          <button
+            className="btn ghost small"
+            onClick={async () => {
+              const n = await retryErrors();
+              toast(`Ponawiam ${n} akcji`, 'info');
+            }}
+          >
+            Ponów błędy ({actStats.error})
+          </button>
+        ) : null}
+      </div>
+
+      <h3>Lista kont do dociągania (tryb przeglądarkowy)</h3>
+      <textarea
+        className="field"
+        value={settings.followList}
+        onChange={(e) => set('followList', e.target.value)}
+        placeholder="nasa, spacex, orbita_pl — po przecinku albo w linii"
+      />
+      <p className="tiny dim" style={{ marginTop: 6 }}>
+        Rozpoznane: {parsedHandles.length ? parsedHandles.map((h) => `@${h}`).join(', ') : '—'}
+        {' · '}w APK lista jest tylko uzupełnieniem — i tak zbieramy to, co widzisz.
+      </p>
 
       <h2>Miejsce i offline</h2>
       <div className="banner" style={{ marginTop: 0 }}>

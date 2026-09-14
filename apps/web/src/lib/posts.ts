@@ -5,13 +5,20 @@ import type { PostRecord } from './types';
 /** Wstawia/aktualizuje posty, zachowując to, co już zostało pobrane do offline. */
 export async function upsertPosts(posts: PostRecord[]): Promise<PostRecord[]> {
   const merged: PostRecord[] = [];
+  // Jeśli dla posta czeka akcja (polubienie/zakładka kliknięte offline), NIE nadpisujemy
+  // tych flag tym, co mówi serwer — inaczej świeżo pobrany post „anulowałby” nasz zamiar.
+  const queued = await db.actions.where('status').anyOf('pending', 'sending').toArray();
+  const queuedIds = new Set(queued.map((a) => a.tweetId));
   await db.transaction('rw', db.posts, async () => {
     for (const post of posts) {
       const existing = await db.posts.get(post.id);
+      const keepInteractions = existing && queuedIds.has(existing.nativeId);
       const next: PostRecord = {
         ...post,
         savedAt: existing?.savedAt ?? post.savedAt ?? null,
         sizeBytes: existing?.sizeBytes ?? post.sizeBytes ?? 0,
+        xLiked: keepInteractions ? existing.xLiked : (post.xLiked ?? existing?.xLiked ?? false),
+        xBookmarked: keepInteractions ? existing.xBookmarked : (post.xBookmarked ?? existing?.xBookmarked ?? false),
         media: post.media.map((m) => {
           const prev = existing?.media?.find((x) => x.url === m.url);
           return prev?.cached ? { ...m, cached: true, bytes: prev.bytes } : m;
@@ -34,7 +41,18 @@ export interface SaveOutcome {
 
 /** Zapis posta + mediów do offline. */
 export async function saveOffline(post: PostRecord, signal?: AbortSignal): Promise<SaveOutcome> {
-  await db.posts.put(post);
+  // Nie zadeptujemy stanu, który zdążył się zmienić (np. właśnie dodaliśmy zakładkę).
+  const existing = await db.posts.get(post.id);
+  await db.posts.put(
+    existing
+      ? {
+          ...post,
+          xLiked: post.xLiked ?? existing.xLiked,
+          xBookmarked: post.xBookmarked ?? existing.xBookmarked,
+          savedAt: existing.savedAt ?? post.savedAt ?? null,
+        }
+      : post,
+  );
   const outcome = await cachePostMedia(post, signal);
   await db.posts.update(post.id, { savedAt: Date.now() });
   await refreshAccountCounts();

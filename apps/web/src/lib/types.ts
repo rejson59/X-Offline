@@ -58,6 +58,13 @@ export interface PostRecord {
   tags?: string[];
   /** Kontekst pobrania (np. z profilu kogo). */
   fetchedFrom?: string;
+  /** Mirrored stany z X: polubienie / zakładka. */
+  xLiked?: boolean;
+  xBookmarked?: boolean;
+  /** Jak post trafił do offline. */
+  via?: 'manual' | 'auto-scroll' | 'bookmarks-mirror' | 'fill' | 'import';
+  /** Kiedy ostatnio próbowaliśmy odtworzyć akcję w X. */
+  actionError?: string;
 }
 
 export interface AccountRow {
@@ -92,6 +99,27 @@ export interface JobRow {
   lastError?: string;
 }
 
+export type ActionKind = 'like' | 'unlike' | 'bookmark' | 'unbookmark';
+export type ActionStatus = 'pending' | 'sending' | 'sent' | 'error';
+
+export interface ActionRow {
+  id?: number;
+  kind: ActionKind;
+  /** ID posta w X (nie nasz klucz!) — żeby dało się odtworzyć bez rekordu w bazie. */
+  tweetId: string;
+  tweetUrl?: string;
+  postId: string;
+  authorHandle?: string;
+  snippet?: string;
+  status: ActionStatus;
+  attempts: number;
+  createdAt: number;
+  sentAt?: number | null;
+  error?: string;
+  /** Skąd się wzięło: ręcznie w czytniku czy z lustrzanki X. */
+  origin?: 'offline-reader' | 'mirror' | 'manual';
+}
+
 export interface BlobRow {
   key: string;
   postId: string;
@@ -119,6 +147,28 @@ export interface Settings {
   /** Pełnoekranowy odtwarzacz w stylu pionowej szpulki. */
   reelMode: boolean;
   fontSize: number;
+
+  // ——— auto-offline (to jest teraz rdzeń apki) ———
+  /** Zapisuj do offline każdy post napotkany w podglądzie na żywo. */
+  autoCapture: boolean;
+  /** Do ilu postów dokarmiać offline (50 / 100 / 200 / 500). */
+  autoTarget: number;
+  /** Samo przewijanie w podglądzie, aż zbierze się partia postów. */
+  autoScroll: boolean;
+  /** Rozmiar jednej porcji przy auto-przewijaniu (ile ekranów na raz). */
+  scrollBatch: number;
+  /** Traktuj zakładki X (bookmarks) jako źródło postów do offline. */
+  mirrorBookmarks: boolean;
+  /** Odwrotnie: to, co zapiszesz w X-Offline, dodaj też do zakładek X (gdy będzie łącze). */
+  mirrorToBookmarks: boolean;
+  /** Wysyłaj zaległe polubienia/zakładki, gdy tylko apka złapie łącze. */
+  replayActions: boolean;
+  /** Pobieraj media tylko na Wi-Fi (systemowe saveData też jest szanowane). */
+  mediaOnWifiOnly: boolean;
+  /** Miękki limit: gdy offline ma >= autoTarget postów, przestań dokarmiać. */
+  trimOverTarget: boolean;
+  /** Lista kont, z których czytamy w przeglądarce (enter / przecinek). W APK zbieramy to, co widzisz. */
+  followList: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -133,4 +183,14 @@ export const DEFAULT_SETTINGS: Settings = {
   respectSaveData: true,
   reelMode: true,
   fontSize: 15,
+  autoCapture: true,
+  autoTarget: 200,
+  autoScroll: true,
+  scrollBatch: 8,
+  mirrorBookmarks: true,
+  mirrorToBookmarks: false,
+  replayActions: true,
+  mediaOnWifiOnly: false,
+  trimOverTarget: false,
+  followList: 'kasia_koduje, silesia_dev, orbita_pl, foto_wegierek, low_bitrate, x_offline',
 };

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { pushBackHandler } from '@/lib/native';
+import { clearSent, discardAction, maybeReplay, retryErrors } from '@/lib/actions';
+import { useActionList } from '@/lib/actionsView';
 import { useSettings } from '@/lib/store';
 import { jobHistory, useQueue } from '@/lib/download';
 import type { JobRow } from '@/lib/types';
@@ -200,5 +202,100 @@ export function Toasts() {
         </button>
       ))}
     </div>
+  );
+}
+
+/** Plan akcji: co kliknąłeś w offline i co czeka na wysyłkę do X. */
+export function ActionsSheet({ onClose }: { onClose: () => void }) {
+  const { rows, stats } = useActionList();
+  const [busy, setBusy] = useState(false);
+  const toast = useSettings((s) => s.toast);
+
+  return (
+    <Sheet
+      title="Kolejka akcji do X"
+      subtitle="Polubienia i zakładki kliknięte bez internetu. Wysyłamy natychmiast, gdy wróci łącze (w APK, tam gdzie jest Twoja sesja)."
+      onClose={onClose}
+      footer={
+        <div className="row">
+          <button
+            className="btn ghost grow"
+            onClick={async () => {
+              const n = await clearSent();
+              toast(n ? `Wyczyszczone ${n} wysłanych` : 'Nie ma wysłanych do czyszczenia', 'info');
+            }}
+          >
+            Wyczyść wysłane
+          </button>
+          <button
+            className="btn primary grow"
+            disabled={busy || !stats.pending}
+            onClick={async () => {
+              setBusy(true);
+              const res = await maybeReplay();
+              setBusy(false);
+              toast(
+                res.sent ? `Wysłane: ${res.sent}` : res.reason ? `Czekają: ${res.reason}` : 'Nic do wysłania',
+                res.sent ? 'ok' : 'warn',
+              );
+            }}
+          >
+            {busy ? 'Wysyłam…' : `Wyślij ${stats.pending || ''}`}
+          </button>
+        </div>
+      }
+    >
+      {!rows.length ? (
+        <p className="dim small">
+          Pusto. Polub albo dodaj do zakładek dowolny post w czytniku offline — zapisze się tu i poleci przy
+          najbliższym łączu.
+        </p>
+      ) : null}
+
+      {stats.error ? (
+        <div className="banner warn" style={{ marginTop: 0, alignItems: 'center' }}>
+          <div className="grow small">{stats.error} akcji nie udało się wysłać (X mógł zmienić API albo sesja wygasła).</div>
+          <button
+            className="btn ghost small"
+            onClick={async () => {
+              const n = await retryErrors();
+              toast(`Ponawiam ${n}`, 'info');
+            }}
+          >
+            Ponów
+          </button>
+        </div>
+      ) : null}
+
+      {rows.map((row) => (
+        <div className="queue-item" key={row.id}>
+          <div className="row">
+            <span className={`badge ${row.status === 'sent' ? 'ok' : row.status === 'error' ? 'err' : 'info'}`}>
+              {row.status === 'pending' ? 'czeka' : row.status === 'sending' ? 'wysyłam' : row.status === 'sent' ? 'wysłane' : 'błąd'}
+            </span>
+            <div className="grow">
+              <b className="small">
+                {row.kind === 'like' ? 'polubienie' : row.kind === 'unlike' ? 'cofnięcie polubienia' : row.kind === 'bookmark' ? 'zakładka X' : 'usunięcie zakładki'}
+                {row.authorHandle ? ` · @${row.authorHandle}` : ''}
+              </b>
+              {row.snippet ? <div className="tiny dim">{row.snippet}</div> : null}
+              <div className="tiny dim">
+                {new Date(row.createdAt).toLocaleString('pl-PL')} · próba {row.attempts}
+                {row.error ? ` · ${row.error}` : ''}
+              </div>
+            </div>
+            <button
+              className="icon-btn"
+              aria-label="Usuń z kolejki"
+              onClick={async () => {
+                if (row.id) await discardAction(row.id);
+              }}
+            >
+              <IconClose />
+            </button>
+          </div>
+        </div>
+      ))}
+    </Sheet>
   );
 }

@@ -11,7 +11,7 @@ import { libraryFileName, saveTextFile } from '@/lib/native';
 import { IconBookmark, IconDownload, IconSearch, IconShare } from './Icons';
 import type { PostRecord } from '@/lib/types';
 
-type Chip = 'all' | 'media' | 'video' | 'text';
+type Chip = 'all' | 'media' | 'video' | 'text' | 'liked' | 'bookmarked' | 'queued';
 
 export function OfflineTab() {
   const [q, setQ] = useState('');
@@ -37,6 +37,9 @@ export function OfflineTab() {
       if (chip === 'media' && !p.media.length) return false;
       if (chip === 'video' && !p.media.some((m) => m.kind === 'video' || m.kind === 'gif')) return false;
       if (chip === 'text' && p.media.length) return false;
+      if (chip === 'liked' && !p.xLiked) return false;
+      if (chip === 'bookmarked' && !p.xBookmarked) return false;
+      if (chip === 'queued' && !queuedIds.has(p.id)) return false;
       if (!needle) return true;
       return (
         p.text.toLowerCase().includes(needle) ||
@@ -46,6 +49,11 @@ export function OfflineTab() {
       );
     });
   }, [saved, q, chip, handle]);
+
+  const queuedIds = useLiveQuery(async () => {
+    const rows = await db.actions.where('status').anyOf('pending', 'sending', 'error').toArray();
+    return new Set(rows.map((r) => r.postId));
+  }, [], new Set<string>());
 
   const bytes = useMemo(() => shown.reduce((s, p) => s + (p.sizeBytes ?? 0), 0), [shown]);
   const capBytes = settings.storageCapMb * 1024 * 1024;
@@ -111,6 +119,9 @@ export function OfflineTab() {
             ['media', 'Z mediami'],
             ['video', 'Wideo/GIF'],
             ['text', 'Sam tekst'],
+            ['liked', 'Polubione'],
+            ['bookmarked', 'Zakładki X'],
+            ['queued', 'Z kolejki akcji'],
           ] as [Chip, string][]
         ).map(([id, label]) => (
           <button

@@ -68,6 +68,29 @@ export const IconShare = (p: P) => (
   </svg>
 );
 
+export const IconHeartFilled = (p: P) => (
+  <svg {...base(p)}>
+    <path
+      d="M12 20s-7.5-4.4-7.5-9.3A4.2 4.2 0 0 1 12 8a4.2 4.2 0 0 1 7.5 2.7C19.5 15.6 12 20 12 20Z"
+      fill="currentColor"
+      stroke="none"
+    />
+  </svg>
+);
+
+export const IconBookmarkFilled = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M6 3.8h12v17l-6-4.4-6 4.4z" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+export const IconQueue = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M4 7h10M4 12h10M4 17h6" />
+    <circle cx="18" cy="17" r="2.6" />
+  </svg>
+);
+
 export const IconExternal = (p: P) => (
   <svg {...base(p)}>
     <path d="M14 4h6v6" />

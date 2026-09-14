@@ -8,8 +8,13 @@ coverage/
 .env.*
 !.env.example
 
-# Android / Capacitor — generowane lokalnie, budowane w CI
-/android/
+# Android: projekt natywny JEST w repo (Capacitor tak radzi), ale nie jego buildy
+android/build/
+android/**/build/
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/release/
 /ios/
 .capacitor/
 *.apk
@@ -33,3 +38,6 @@ x-offline-pwa.zip
 
 # workflowy trzymane w ci/ (patrz sekcja CI w README) — skopiuj je przez `npm run ci:install`
 /.github/workflows/
+
+# vite-plugin-pwa w trybie dev
+apps/web/dev-dist/
