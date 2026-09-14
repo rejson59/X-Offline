@@ -3,10 +3,11 @@ import { pushBackHandler } from '@/lib/native';
 import { clearSent, discardAction, maybeReplay, retryErrors } from '@/lib/actions';
 import { useActionList } from '@/lib/actionsView';
 import { useSettings } from '@/lib/store';
+import { isNative } from '@/lib/transport';
 import { jobHistory, useQueue } from '@/lib/download';
 import type { JobRow } from '@/lib/types';
 import { bytesLabel } from '@/lib/format';
-import { IconClose, IconDownload } from './Icons';
+import { IconClose, IconDownload, IconExternal } from './Icons';
 
 export function Sheet({
   title,
@@ -245,6 +246,15 @@ export function ActionsSheet({ onClose }: { onClose: () => void }) {
         </div>
       }
     >
+      {!isNative() ? (
+        <div className="banner warn" style={{ marginTop: 0, marginBottom: 10 }}>
+          <div className="small">
+            Wysyłka klika przyciski w Twojej sesji X — to jest w APK. W przeglądarce kolejka zostaje, a przy
+            każdej akcji jest link do posta, żeby kliknąć ręcznie.
+          </div>
+        </div>
+      ) : null}
+
       {!rows.length ? (
         <p className="dim small">
           Pusto. Polub albo dodaj do zakładek dowolny post w czytniku offline — zapisze się tu i poleci przy
@@ -284,6 +294,18 @@ export function ActionsSheet({ onClose }: { onClose: () => void }) {
                 {row.error ? ` · ${row.error}` : ''}
               </div>
             </div>
+            {row.tweetUrl ? (
+              <a
+                className="icon-btn"
+                href={row.tweetUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Otwórz post w X"
+                title="Otwórz post w X i kliknij sam"
+              >
+                <IconExternal />
+              </a>
+            ) : null}
             <button
               className="icon-btn"
               aria-label="Usuń z kolejki"
