@@ -229,6 +229,33 @@ a {
   animation: pop-in 0.35s ease;
 }
 
+/* Zaznaczone kafelki w trybie wybierania wielu postów. */
+.post.is-selected {
+  background: rgba(29, 155, 240, 0.12);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.picker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+
+.picker.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.picker svg {
+  width: 13px;
+  height: 13px;
+}
+
 @keyframes pop-in {
   from {
     opacity: 0;

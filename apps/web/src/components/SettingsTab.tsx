@@ -3,17 +3,17 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/db';
 import { useSettings } from '@/lib/store';
 import { useQueue } from '@/lib/download';
-import { estimateStorage, pruneToCap, revokeAllObjectUrls } from '@/lib/media';
-import { exportLibrary, importLibrary, unsavePosts } from '@/lib/posts';
+import { ensurePersistentStorage, estimateStorage, pruneToCap, revokeAllObjectUrls } from '@/lib/media';
+import { exportLibrary, exportMarkdown, fetchMissingMedia, importLibrary, unsavePosts } from '@/lib/posts';
+import { diagnosticsToText, logDiag, useDiagnostics } from '@/lib/diagnostics';
 import { maybeReplay, retryErrors } from '@/lib/actions';
 import { useActionList } from '@/lib/actionsView';
 import { useFill } from '@/lib/autosync';
 import { libraryFileName, saveTextFile } from '@/lib/native';
-import { resetDemo, demoGeneratedAt } from '@/lib/demo';
 import { isNative, probeProxy } from '@/lib/transport';
 import { bytesLabel, plural } from '@/lib/format';
 import { Sheet } from './Sheets';
-import { IconCheck, IconClose, IconDownload, IconRefresh } from './Icons';
+import { IconCheck, IconClose, IconDownload, IconRefresh, IconTrash } from './Icons';
 import type { Settings } from '@/lib/types';
 
 function Toggle({
@@ -30,7 +30,9 @@ function Toggle({
   return (
     <div className="list-item">
       <div className="grow">
-        <div className="small"><b>{label}</b></div>
+        <div className="small">
+          <b>{label}</b>
+        </div>
         {hint ? <div className="tiny dim">{hint}</div> : null}
       </div>
       <button className="switch" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} />
@@ -50,16 +52,31 @@ export function SettingsTab() {
   const savedCount = useQueue((s) => s.savedCount);
   const totalBytes = useQueue((s) => s.totalBytes);
   const [proxy, setProxy] = useState<{ ok: boolean; note: string }>({ ok: false, note: '—' });
-  const [sheet, setSheet] = useState<null | 'reset' | 'clear'>(null);
+  const [sheet, setSheet] = useState<null | 'clear' | 'purge'>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [persisted, setPersisted] = useState<boolean | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const storage = useLiveQuery(() => estimateStorage(), [], { usage: 0, quota: 0 });
   const accounts = useLiveQuery(() => db.accounts.toArray(), [], []);
   const jobs = useLiveQuery(() => db.jobs.orderBy('createdAt').reverse().limit(8).toArray(), [], []);
+  const unread = useLiveQuery(
+    async () => (await db.posts.where('savedAt').above(0).toArray()).filter((p) => !p.readAt).length,
+    [],
+    0,
+  );
   const { stats: actStats } = useActionList();
   const fill = useFill();
+  const diag = useDiagnostics((s) => s.entries);
   const parsedHandles = useMemo(
     () =>
-      [...new Set((settings.followList || '').split(/[\s,;\n]+/).map((h) => h.trim().replace(/^@/, '')).filter((h) => /^[A-Za-z0-9_]{1,15}$/.test(h)))],
+      [
+        ...new Set(
+          (settings.followList || '')
+            .split(/[\s,;\n]+/)
+            .map((h) => h.trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, '').replace(/[/?#].*$/, ''))
+            .filter((h) => /^[A-Za-z0-9_]{1,15}$/.test(h)),
+        ),
+      ],
     [settings.followList],
   );
 
@@ -70,25 +87,36 @@ export function SettingsTab() {
         note: r.ok ? `ok · upstream ${r.upstream ?? '?'}` : (r.error ?? 'brak odpowiedzi'),
       }),
     );
+    void navigator.storage?.persisted?.().then((v) => setPersisted(Boolean(v)));
   }, [settings.proxyUrl]);
 
   function set<K extends keyof Settings>(key: K, value: Settings[K]) {
     patch({ [key]: value } as Partial<Settings>);
   }
 
+  async function copyDiagnostics(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(diagnosticsToText(diag));
+      toast('Dziennik skopiowany do schowka', 'ok');
+    } catch {
+      const res = await saveTextFile(`xoffline-diagnostyka-${Date.now()}.txt`, diagnosticsToText(diag), 'text/plain');
+      toast(res.where === 'native' ? `Zapisano dziennik — ${res.label ?? 'Documents'}` : 'Nie udało się skopiować', 'warn');
+    }
+  }
+
   return (
     <div className="section">
       <h2>Tryb pracy</h2>
       <p className="lede">
-        X-Offline nie używa płatnego API. Treści czytamy z publicznych endpointów osadzeń (takich, jakich używają
-        widgety tweetów), a potem trzymamy je w pamięci urządzenia.
+        X-Offline nie używa płatnego API X. Treści czytamy z publicznych endpointów osadzeń (takich, jakich używają
+        widgety tweetów) albo — w APK — z Twojej własnej sesji w natywnym podglądzie. Wszystko, co pobrane, ląduje w
+        pamięci urządzenia.
       </p>
       <div className="list" style={{ marginTop: 10 }}>
         {(
           [
-            ['auto', 'Auto', 'Natywnie bez proxy, w przeglądarce przez proxy, a jak nic nie wyjdzie — dane demo.'],
-            ['demo', 'Tylko demo', 'Zero zapytań sieciowych. Idealne do sprawdzania działania offline.'],
-            ['proxy', 'Tylko proxy', 'Wymaga działającego serwera proxy (npm run start:server albo własny adres).'],
+            ['auto', 'Auto', 'Natywnie w APK, w przeglądarce przez proxy — jeśli nic nie odpowiada, powie wprost co zrobić.'],
+            ['proxy', 'Tylko proxy', 'Wymaga działającego serwera proxy (npm run dev:server albo własny adres).'],
             ['direct', 'Wprost z przeglądarki', 'Próba fetch() do X bez proxy. Zwykle blokuje to CORS — test dla upartych.'],
           ] as [Settings['sourceMode'], string, string][]
         ).map(([id, name, hint]) => (
@@ -102,7 +130,9 @@ export function SettingsTab() {
             style={{ background: settings.sourceMode === id ? 'rgba(29,155,240,.1)' : undefined }}
           >
             <div className="grow">
-              <div className="small"><b>{name}</b></div>
+              <div className="small">
+                <b>{name}</b>
+              </div>
               <div className="tiny dim">{hint}</div>
             </div>
             {settings.sourceMode === id ? <IconCheck style={{ color: 'var(--accent)' }} /> : null}
@@ -138,7 +168,7 @@ export function SettingsTab() {
       <h2>Auto-offline i akcje</h2>
       <p className="lede">
         Zero klikania po posty: apka sama dokarmia czytnik — w APK tym, co przewijasz w podglądzie X, a w przeglądarce
-        partiami z listy kont. Polubienia i zakładki kliknięte offline czekają w kolejce i lecą, gdy wróci łącze.
+        partiami z listy profili. Polubienia i zakładki kliknięte offline czekają w kolejce i lecą, gdy wróci łącze.
       </p>
 
       <h3>Do ilu postów dokarmiać offline</h3>
@@ -197,18 +227,14 @@ export function SettingsTab() {
         />
         <Toggle
           label="Przytnij nadmiar ponad cel"
-          hint="Gdy offline urośnie ponad autoTarget, zrzucamy media najstarszych postów."
+          hint="Gdy offline urośnie ponad autoTarget, najstarsze posty wracają do stanu „tylko online” (tekst zostaje w bazie)."
           checked={settings.trimOverTarget}
           onChange={(v) => set('trimOverTarget', v)}
         />
       </div>
 
       <div className="row" style={{ marginTop: 10, flexWrap: 'wrap', gap: 8 }}>
-        <button
-          className="btn primary small grow"
-          disabled={fill.running}
-          onClick={() => void fill.start()}
-        >
+        <button className="btn primary small grow" disabled={fill.running} onClick={() => void fill.start()}>
           {fill.running ? `Dociągam… ${fill.saved}/${fill.target}` : `Dociągnij do ${settings.autoTarget} teraz`}
         </button>
         <button
@@ -216,7 +242,7 @@ export function SettingsTab() {
           disabled={!actStats.pending}
           onClick={async () => {
             const r = await maybeReplay();
-            toast(r.sent ? `Wysłane: ${r.sent}` : `Czekają: ${r.reason ?? 'brak akcji'}`, r.sent ? 'ok' : 'warn');
+            toast(r.queued ? `Klikam w X: ${r.queued}` : `Czekają: ${r.reason ?? 'brak akcji'}`, r.queued ? 'ok' : 'warn');
           }}
         >
           Wyślij akcje ({actStats.pending})
@@ -234,12 +260,12 @@ export function SettingsTab() {
         ) : null}
       </div>
 
-      <h3>Lista kont do dociągania (tryb przeglądarkowy)</h3>
+      <h3>Lista profili do dociągania (tryb przeglądarkowy)</h3>
       <textarea
         className="field"
         value={settings.followList}
         onChange={(e) => set('followList', e.target.value)}
-        placeholder="nasa, spacex, orbita_pl — po przecinku albo w linii"
+        placeholder="nasa, spacex, twoj_profil — po przecinku albo w linii"
       />
       <p className="tiny dim" style={{ marginTop: 6 }}>
         Rozpoznane: {parsedHandles.length ? parsedHandles.map((h) => `@${h}`).join(', ') : '—'}
@@ -252,23 +278,45 @@ export function SettingsTab() {
         <div className="grow small">
           <dl className="kv">
             <dt>Zapisane posty</dt>
-            <dd>{plural(savedCount, 'post', 'posty', 'postów')}</dd>
+            <dd>
+              {plural(savedCount, 'post', 'posty', 'postów')}
+              {unread ? ` · ${unread} nieprzeczytanych` : ''}
+            </dd>
             <dt>Media w bazie</dt>
             <dd>{bytesLabel(totalBytes)}</dd>
             <dt>Całkowite zużycie</dt>
             <dd>{bytesLabel(storage.usage)}</dd>
             <dt>Budżet urządzenia</dt>
             <dd>{storage.quota ? bytesLabel(storage.quota) : '—'}</dd>
+            <dt>Trwałe miejsce</dt>
+            <dd>
+              {persisted === null ? '—' : persisted ? 'przyznane (system nie wyrzuci postów)' : 'nieprzyznane'}
+            </dd>
           </dl>
           {storage.quota ? (
-            <div className={`meter${storage.usage / storage.quota > 0.9 ? ' over' : storage.usage / storage.quota > 0.6 ? ' warn' : ''}`} style={{ marginTop: 8 }}>
+            <div
+              className={`meter${storage.usage / storage.quota > 0.9 ? ' over' : storage.usage / storage.quota > 0.6 ? ' warn' : ''}`}
+              style={{ marginTop: 8 }}
+            >
               <i style={{ width: `${Math.min(100, (storage.usage / storage.quota) * 100)}%` }} />
             </div>
           ) : null}
           <div className="tiny dim" style={{ marginTop: 6 }}>
-            Przeglądarka trzyma to w własnej kwocie IndexedDB/Cache API — odinstalowanie apki czyści pamięć.
+            Posty i media leżą w IndexedDB (w APK w pamięci apki) — odinstalowanie apki czyści wszystko.
           </div>
         </div>
+      </div>
+
+      <div className="list">
+        <Toggle
+          label="Proś o trwałe miejsce na dane"
+          hint="System nie usunie zapisanych postów przy braku miejsca. Wyłącz tylko wtedy, gdy wolisz oddawać je systemowi."
+          checked={settings.persistStorage}
+          onChange={(v) => {
+            set('persistStorage', v);
+            if (v) void ensurePersistentStorage().then((ok) => setPersisted(ok));
+          }}
+        />
       </div>
 
       <h3>Limit offline</h3>
@@ -283,7 +331,7 @@ export function SettingsTab() {
       <div className="list">
         <Toggle
           label="Auto-czyszczenie przy limicie"
-          hint={`Gdy przekroczysz limit, odejmujemy media najstarszych zapisów (zostawiamy ${settings.pruneKeepPosts} najnowszych).`}
+          hint={`Gdy przekroczysz limit, zrzucamy media najstarszych zapisów (tekst zostaje; ${settings.pruneKeepPosts} najnowszych bez zmian).`}
           checked={settings.autoPrune}
           onChange={(v) => set('autoPrune', v)}
         />
@@ -307,29 +355,43 @@ export function SettingsTab() {
         />
       </div>
 
-      <div className="row" style={{ marginTop: 10 }}>
+      <div className="row" style={{ marginTop: 10, flexWrap: 'wrap', gap: 8 }}>
         <button
           className="btn ghost small grow"
+          disabled={busy !== null}
           onClick={async () => {
-            const res = await pruneToCap(settings.storageCapMb, settings.pruneKeepPosts);
-            await refreshTotals();
-            toast(res.removed ? `Zwolniono ${res.removed} ${res.removed === 1 ? 'wpis' : 'wpisów'} (${bytesLabel(res.bytes)})` : 'Nie było co sprzątać', 'ok');
+            setBusy('prune');
+            try {
+              const res = await pruneToCap(settings.storageCapMb, settings.pruneKeepPosts);
+              await refreshTotals();
+              toast(
+                res.removed ?
+                  `Zrzucono media z ${res.removed} postów (${bytesLabel(res.bytes)}) — teksty zostały`
+                : 'Nie było czego sprzątać',
+                'ok',
+              );
+            } finally {
+              setBusy(null);
+            }
           }}
         >
           Zwolnij miejsce teraz
         </button>
         <button
           className="btn ghost small grow"
+          disabled={busy !== null}
           onClick={async () => {
-            const rows = await db.posts.where('savedAt').above(0).primaryKeys();
-            if (!rows.length) return toast('Brak zapisanych postów', 'info');
-            const freed = await unsavePosts(rows as string[]);
-            await refreshTotals();
-            revokeAllObjectUrls();
-            toast(`Usunięto wszystko z offline (${bytesLabel(freed)})`, 'warn');
+            setBusy('media');
+            try {
+              const out = await fetchMissingMedia();
+              await refreshTotals();
+              toast(out.posts ? `Dociągnięto media do ${out.posts} postów (${bytesLabel(out.bytes)})` : 'Wszystkie media są już w pamięci', out.posts ? 'ok' : 'info');
+            } finally {
+              setBusy(null);
+            }
           }}
         >
-          Usuń cały offline
+          <IconRefresh /> {busy === 'media' ? 'Dociągam…' : 'Dociągnij brakujące media'}
         </button>
       </div>
 
@@ -341,9 +403,17 @@ export function SettingsTab() {
           checked={settings.reelMode}
           onChange={(v) => set('reelMode', v)}
         />
+        <Toggle
+          label="Otwarcie posta = przeczytany"
+          hint="Posty, które otworzysz w czytniku, znikają z „Nieprzeczytanych”."
+          checked={settings.markReadOnOpen}
+          onChange={(v) => set('markReadOnOpen', v)}
+        />
         <div className="list-item">
           <div className="grow">
-            <div className="small"><b>Rozmiar tekstu postu</b></div>
+            <div className="small">
+              <b>Rozmiar tekstu postu</b>
+            </div>
             <div className="tiny dim">{settings.fontSize}px</div>
           </div>
           <input
@@ -374,8 +444,10 @@ export function SettingsTab() {
       <div className="list">
         <div className="list-item">
           <div className="grow">
-            <div className="small"><b>Eksport offline</b></div>
-            <div className="tiny dim">Plik .json z zapisanymi postami — przeniesiesz go na inny telefon.</div>
+            <div className="small">
+              <b>Eksport offline (.json)</b>
+            </div>
+            <div className="tiny dim">Kopia zapasowa biblioteki — przeniesiesz ją na inny telefon.</div>
           </div>
           <button
             className="btn ghost small"
@@ -383,12 +455,7 @@ export function SettingsTab() {
               const lib = await exportLibrary();
               if (!lib.posts.length) return toast('Nie ma czego eksportować', 'warn');
               const res = await saveTextFile(libraryFileName(), JSON.stringify(lib, null, 2));
-              toast(
-                res.where === 'native' ?
-                  `Plik: ${res.label ?? 'Documents'}`
-                : `Wyeksportowano ${plural(lib.posts.length, 'post', 'posty', 'postów')}`,
-                'ok',
-              );
+              toast(res.where === 'native' ? `Plik: ${res.label ?? 'Documents'}` : `Wyeksportowano ${plural(lib.posts.length, 'post', 'posty', 'postów')}`, 'ok');
             }}
           >
             Pobierz
@@ -396,8 +463,29 @@ export function SettingsTab() {
         </div>
         <div className="list-item">
           <div className="grow">
-            <div className="small"><b>Import biblioteki</b></div>
-            <div className="tiny dim">Wczytuje posty z pliku i dociąga brakujące media.</div>
+            <div className="small">
+              <b>Eksport do czytania (.md)</b>
+            </div>
+            <div className="tiny dim">Zwykły plik Markdown — otworzysz go w notatniku albo innym czytniku.</div>
+          </div>
+          <button
+            className="btn ghost small"
+            onClick={async () => {
+              const md = await exportMarkdown();
+              if (!md.posts) return toast('Nie ma czego eksportować', 'warn');
+              const res = await saveTextFile(md.name, md.text, 'text/markdown');
+              toast(res.where === 'native' ? `Plik: ${res.label ?? 'Documents'}` : `Zapisano ${md.name}`, 'ok');
+            }}
+          >
+            Pobierz
+          </button>
+        </div>
+        <div className="list-item">
+          <div className="grow">
+            <div className="small">
+              <b>Import biblioteki</b>
+            </div>
+            <div className="tiny dim">Wczytuje posty z pliku .json i dociąga brakujące media.</div>
           </div>
           <input
             ref={fileRef}
@@ -410,7 +498,10 @@ export function SettingsTab() {
               try {
                 const res = await importLibrary(JSON.parse(await file.text()));
                 await refreshTotals();
-                toast(`Wczytano ${plural(res.posts, 'post', 'posty', 'postów')} (${bytesLabel(res.bytes)})`, 'ok');
+                toast(
+                  `Wczytano ${plural(res.posts, 'post', 'posty', 'postów')} (${bytesLabel(res.bytes)})${res.failed ? ` · ${res.failed} bez mediów` : ''}`,
+                  'ok',
+                );
               } catch (err) {
                 toast(`Import nie wyszedł: ${(err as Error).message}`, 'error');
               } finally {
@@ -422,13 +513,30 @@ export function SettingsTab() {
             Wybierz
           </button>
         </div>
+      </div>
+
+      <h2>Dane i porządek</h2>
+      <div className="list">
         <div className="list-item">
           <div className="grow">
-            <div className="small"><b>Zestaw demo</b></div>
-            <div className="tiny dim">Wygenerowany {new Date(demoGeneratedAt).toLocaleDateString('pl-PL')} — {plural(accounts.length, 'konto', 'konta', 'kontów')} w bazie.</div>
+            <div className="small">
+              <b>Usuń cały offline</b>
+            </div>
+            <div className="tiny dim">Czyści zapisane posty i media. Baza treści (to, co widziałeś) zostaje.</div>
           </div>
-          <button className="btn ghost small" onClick={() => setSheet('reset')}>
-            Przeładuj
+          <button className="btn ghost small" onClick={() => setSheet('clear')}>
+            <IconTrash /> Wyczyść
+          </button>
+        </div>
+        <div className="list-item">
+          <div className="grow">
+            <div className="small">
+              <b>Zresetuj apkę</b>
+            </div>
+            <div className="tiny dim">Czyści wszystko: posty, media, kolejki, ustawienia. Nieodwracalne.</div>
+          </div>
+          <button className="btn danger small" onClick={() => setSheet('purge')}>
+            <IconTrash /> Reset
           </button>
         </div>
       </div>
@@ -449,38 +557,121 @@ export function SettingsTab() {
             <dd>{netInfo.saveData ? 'włączone' : 'wyłączone'}</dd>
             <dt>Platforma</dt>
             <dd>{isNative() ? 'natywna (Capacitor)' : 'przeglądarka'}</dd>
-            <dt>Ostatnie zadania</dt>
-            <dd>{jobs.length ? jobs[0].status : '—'}</dd>
+            <dt>Profile</dt>
+            <dd>{accounts.length}</dd>
+            <dt>Ostatnie zadanie</dt>
+            <dd>{jobs.length ? `${jobs[0].status} · ${jobs[0].label}` : '—'}</dd>
           </dl>
         </div>
       </div>
 
-      {sheet === 'reset' ? (
-        <Sheet title="Przeładować zestaw demo?" subtitle="Usunie pobrane media i przywróci 34 posty demonstracyjne." onClose={() => setSheet(null)}>
-          <p className="small dim">Twoje własne zapisane posty znikną wraz z nimi — to czysty reset bazy.</p>
-          <div className="row">
-            <button className="btn ghost grow" onClick={() => setSheet(null)}>
-              <IconClose /> Zostań przy moich danych
-            </button>
-            <button
-              className="btn primary grow"
-              onClick={async () => {
-                const n = await resetDemo();
-                await refreshTotals();
-                revokeAllObjectUrls();
-                setSheet(null);
-                toast(`Załadowano ${n} postów demo`, 'ok');
-              }}
-            >
-              Reset
-            </button>
-          </div>
+      <div className="row" style={{ marginTop: 8, gap: 8, flexWrap: 'wrap' }}>
+        <button className="btn ghost small grow" onClick={() => void copyDiagnostics()} disabled={!diag.length}>
+          <IconDownload /> Skopiuj dziennik ({diag.length})
+        </button>
+        <button
+          className="btn ghost small grow"
+          onClick={() => {
+            void useDiagnostics.getState().clear();
+            logDiag('info', 'dziennik wyczyszczony przez użytkownika');
+          }}
+        >
+          <IconClose /> Wyczyść dziennik
+        </button>
+      </div>
+
+      {diag.length ? (
+        <div className="list" style={{ marginTop: 8 }}>
+          {diag.slice(0, 12).map((entry, i) => (
+            <div className="list-item" key={`${entry.at}-${i}`}>
+              <div className="grow">
+                <div className="row tight">
+                  <span className={`badge ${entry.kind === 'error' ? 'err' : entry.kind === 'warn' ? 'warn' : 'info'}`}>{entry.kind}</span>
+                  <span className="tiny dim">{new Date(entry.at).toLocaleTimeString('pl-PL')}</span>
+                </div>
+                <div className="tiny" style={{ wordBreak: 'break-word' }}>{entry.text}</div>
+                {entry.detail ? (
+                  <details className="acc">
+                    <summary className="tiny dim">szczegóły</summary>
+                    <pre className="tiny dim" style={{ whiteSpace: 'pre-wrap', margin: '6px 0 0' }}>
+                      {entry.detail}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            </div>
+          ))}
+          {diag.length > 12 ? <div className="tiny dim" style={{ padding: 8 }}>…i {diag.length - 12} starszych wpisów (skopiuj dziennik, żeby zobaczyć całość)</div> : null}
+        </div>
+      ) : (
+        <p className="tiny dim">Dziennik jest pusty — apka nie zgłaszała błędów. To dobra wiadomość.</p>
+      )}
+
+      {sheet === 'clear' ? (
+        <Sheet
+          title="Usunąć cały offline?"
+          subtitle="Zapisane posty i media znikną. Baza treści i ustawienia zostają."
+          onClose={() => setSheet(null)}
+          footer={
+            <div className="row">
+              <button className="btn ghost grow" onClick={() => setSheet(null)}>
+                <IconClose /> Zostaw
+              </button>
+              <button
+                className="btn danger grow"
+                onClick={async () => {
+                  const rows = await db.posts.where('savedAt').above(0).primaryKeys();
+                  setSheet(null);
+                  if (!rows.length) return toast('Brak zapisanych postów', 'info');
+                  const freed = await unsavePosts(rows as string[]);
+                  await refreshTotals();
+                  revokeAllObjectUrls();
+                  toast(`Usunięto wszystko z offline (${bytesLabel(freed)})`, 'warn');
+                }}
+              >
+                <IconTrash /> Usuń
+              </button>
+            </div>
+          }
+        >
+          <p className="small dim">Media znikną z pamięci, a posty wrócą do stanu „tylko online”.</p>
+        </Sheet>
+      ) : null}
+
+      {sheet === 'purge' ? (
+        <Sheet
+          title="Zresetować apkę?"
+          subtitle="Posty, media, kolejki i ustawienia zostaną skasowane."
+          onClose={() => setSheet(null)}
+          footer={
+            <div className="row">
+              <button className="btn ghost grow" onClick={() => setSheet(null)}>
+                <IconClose /> Zostaw
+              </button>
+              <button
+                className="btn danger grow"
+                onClick={async () => {
+                  setSheet(null);
+                  await Promise.all([db.posts.clear(), db.blobs.clear(), db.accounts.clear(), db.actions.clear(), db.jobs.clear()]);
+                  revokeAllObjectUrls();
+                  await refreshTotals();
+                  toast('Apka wyczyszczona — ustawienia zostają', 'warn');
+                }}
+              >
+                <IconTrash /> Reset
+              </button>
+            </div>
+          }
+        >
+          <p className="small dim">
+            Ustawienia (limit miejsca, źródło, lista profili) zostają. Reset z ustawieniami zrobisz, czyszcząc dane apki
+            w systemie.
+          </p>
         </Sheet>
       ) : null}
 
       <p className="tiny dim" style={{ marginTop: 18 }}>
-        X-Offline 0.1.0 · dane demo: {plural(34, 'post', 'posty', 'postów')} · pamięć lokalna (IndexedDB + Cache API) ·
-        żadne dane nie opuszczają urządzenia poza pobieraniem publicznych treści X.
+        X-Offline 0.2.0 · pamięć lokalna (IndexedDB + Cache API) · zero danych zastępczych: to, co widzisz, przyszło z X.
       </p>
     </div>
   );

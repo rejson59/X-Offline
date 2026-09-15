@@ -1,18 +1,20 @@
 /**
  * Mostek z natywnym podglądem X (APK).
  *
- * W aplikacji natywnej dodaliśmy `XLivePlugin` + `XLiveActivity`: pełnoekranowy WebView
+ * W aplikacji natywnej mamy `XLivePlugin` + `XLiveActivity`: pełnoekranowy WebView
  * na prawdziwym x.com z Twoimi ciasteczkami, plus wstrzyknięty skrypt, który:
  *   - podsłuchuje odpowiedzi `x.com/i/api/graphql/*` i wysyła je do nas jako surowe tweety,
  *   - przewija feed, żeby zebrać partię postów (auto-scroll),
- *   - odtwarza zaległe polubienia / zakładki, gdy jest łącze.
- * W przeglądarce plugin nie istnieje → wszystkie metody grzecznie mówią „niedostępne”,
- * a apka zostaje przy trybie proxy/demo.
+ *   - odtwarza zaległe polubienia / zakładki, gdy jest łącze,
+ *   - raportuje stan (licznik, logi, w tym komunikaty konsoli strony X) — to trafia do diagnostyki.
+ *
+ * W przeglądarce plugin nie istnieje → wszystkie metody grzecznie mówią „niedostępne”.
  */
 import { Capacitor } from '@capacitor/core';
 import type { ActionRow } from './types';
 import type { ReplayResult } from './actions';
-import { ingestTweets } from './capture';
+import { ingestTweets, noteCapture } from './capture';
+import { logDiag } from './diagnostics';
 
 export type LiveTab = 'home' | 'bookmarks' | 'profile' | 'search';
 
@@ -21,6 +23,8 @@ export interface LiveStatus {
   open: boolean;
   /** Ile postów wstrzyknięty skrypt zebrał do tej pory. */
   captured?: number;
+  /** Stary alias — zostaje, żeby czytać odpowiedzi z wcześniejszych wersji pluginu. */
+  collected?: number;
   target?: number;
   loggedIn?: boolean;
   enabled?: boolean;
@@ -33,6 +37,7 @@ export interface OpenLiveOptions {
   tab?: LiveTab;
   handle?: string;
   query?: string;
+  url?: string;
   autoScroll?: boolean;
   /** Ile postów zebrać przed zatrzymaniem przewijania. */
   maxPosts?: number;
@@ -40,11 +45,18 @@ export interface OpenLiveOptions {
   capture?: boolean;
 }
 
+export interface SharedIntent {
+  text?: string;
+  url?: string;
+  subject?: string;
+}
+
 interface XLivePlugin {
   open(opts: OpenLiveOptions): Promise<{ ok: boolean; url?: string }>;
   close(): Promise<{ ok: boolean }>;
   status(): Promise<LiveStatus>;
   replay(actions: unknown[]): Promise<{ queued?: number; raw?: string }>;
+  consumeSharedIntent(): Promise<SharedIntent>;
   addListener(eventName: string, listenerFunc: (event: unknown) => void): Promise<{ remove: () => void }>;
 }
 
@@ -55,6 +67,7 @@ function plugin(): XLivePlugin | undefined {
 }
 
 let capturing = false;
+let detach: (() => void) | null = null;
 
 export const bridge = {
   available(): boolean {
@@ -76,13 +89,36 @@ export const bridge = {
     await plugin()?.close().catch(() => undefined);
   },
 
-  async status() {
+  async status(): Promise<LiveStatus> {
     const p = plugin();
     if (!p) return { open: false, loggedIn: false, captured: 0 };
     try {
-      return await p.status();
-    } catch {
+      const status = await p.status();
+      return status;
+    } catch (err) {
+      logDiag('warn', `status podglądu X: ${(err as Error).message}`);
       return { open: false, loggedIn: false, captured: 0 };
+    }
+  },
+
+  /**
+   * Łapie linki udostępnione apce z innego miejsca Androida (share sheet).
+   * Zdarzenie `shareReceived` wysyła MainActivity, gdy system przekazuje SEND/VIEW.
+   */
+  async startShareListener(onShare: (shared: SharedIntent) => void): Promise<() => void> {
+    const p = plugin();
+    if (!p) return () => undefined;
+    try {
+      const listener = await p.addListener('shareReceived', (event) => {
+        const e = (event as { payload?: SharedIntent }).payload ?? (event as SharedIntent);
+        if (e && (e.text || e.url)) onShare(e);
+      });
+      // To, co przyszło, zanim JS się podniósł.
+      const pending = await p.consumeSharedIntent().catch(() => ({} as SharedIntent));
+      if (pending?.text || pending?.url) onShare(pending);
+      return () => listener.remove();
+    } catch {
+      return () => undefined;
     }
   },
 
@@ -102,32 +138,50 @@ export const bridge = {
   /** Nasłuchuje strumienia tweetów z WebView i wrzuca je do offline (polityka w capture.ts). */
   async startCapturing(): Promise<() => void> {
     const p = plugin();
-    if (!p || capturing) return () => undefined;
+    if (!p || capturing) return detach ?? (() => undefined);
     capturing = true;
-    const handle = (event: unknown) => {
+    const handleTweets = (event: unknown) => {
       const e = event as { payload?: Record<string, unknown> };
       const data = (e.payload ?? e) as { source?: string; tweets?: unknown };
       const mirror = data.source === 'bookmarks-mirror';
       void ingestTweets(data, {
         via: mirror ? 'bookmarks-mirror' : 'auto-scroll',
         source: mirror ? 'bookmarks-mirror' : 'live-scroll',
-      });
+        origin: mirror ? 'mirror' : 'live',
+      })
+        .then((report) => {
+          if (report.reason && report.saved) noteCapture(`podgląd X: ${report.reason}`, 'info');
+        })
+        .catch((err) => logDiag('error', `zapis z podglądu X: ${(err as Error).message}`, (err as Error).stack));
     };
-    const a = await p.addListener('tweetsCaptured', handle);
-    const b = await p.addListener('actionsDone', (event) => {
-      void (async () => {
-        const { reportResults } = await import('./actions');
-        // Natywny mostek owija każdą payloadkę w { payload: ... } — musimy ją odwinąć.
-        const wrapped = event as { payload?: unknown; results?: ReplayResult[] };
-        const e = (wrapped.payload ?? wrapped) as { results?: ReplayResult[] };
-        if (e.results?.length) await reportResults(e.results);
-      })();
-    });
-    return () => {
+    const listeners = await Promise.all([
+      p.addListener('tweetsCaptured', handleTweets),
+      p.addListener('liveStatus', (event) => {
+        const e = (event as { payload?: { info?: string; captured?: number } }).payload;
+        if (e?.info) noteCapture(e.info, 'info');
+      }),
+      p.addListener('captureLog', (event) => {
+        const e = (event as { payload?: { message?: string; error?: string } }).payload;
+        const text = e?.error ?? e?.message;
+        if (text) logDiag('capture', `podgląd X: ${text}`);
+      }),
+      p.addListener('actionsDone', (event) => {
+        void (async () => {
+          const { reportResults } = await import('./actions');
+          // Natywny mostek owija każdą payloadkę w { payload: ... } — musimy ją odwinąć.
+          const wrapped = event as { payload?: unknown; results?: ReplayResult[] };
+          const e = (wrapped.payload ?? wrapped) as { results?: ReplayResult[] } | ReplayResult[];
+          const results = Array.isArray(e) ? e : e.results;
+          if (results?.length) await reportResults(results);
+        })().catch((err) => logDiag('error', `wynik akcji z X: ${(err as Error).message}`));
+      }),
+    ]);
+    detach = () => {
       capturing = false;
-      a.remove();
-      b.remove();
+      listeners.forEach((l) => l?.remove?.());
+      detach = null;
     };
+    return detach;
   },
 
   /**
@@ -140,7 +194,7 @@ export const bridge = {
     w.__xoffline = {
       ingest: async (payload: unknown) => {
         const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
-        return await ingestTweets(parsed, { via: 'import', force: true });
+        return await ingestTweets(parsed, { via: 'import', source: 'import', force: true, origin: 'import' });
       },
       bridge: this,
     };

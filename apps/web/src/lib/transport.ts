@@ -5,11 +5,14 @@
  * syndykacji X (CORS), więc mamy trzy drogi:
  *  1. `native`  — w APK/IPA zapytanie idzie przez CapacitorHttp (sieć natywna, bez CORS),
  *  2. `proxy`   — przez własny serwer (/api/forward), potrzebny w PWA w przeglądarce,
- *  3. `direct`  — próba bezpośredniego fetch() (działa, jeśli serwer X zezwala na CORS
- *                albo użytkownik ma wyłączoną kontrolę CORS); kończy się błędem → fallback do demo.
+ *  3. `direct`  — próba bezpośredniego fetch() (działa, jeśli serwer X zezwala na CORS).
+ *
+ * Wszystkie ścieżki mają limit czasu, jedną próbę ponowienia dla błędów przejściowych
+ * i wspólny format błędu (`TransportError`), więc UI może powiedzieć *co* poszło nie tak.
  */
 import { Capacitor, CapacitorHttp, type HttpResponse } from '@capacitor/core';
 import { useSettings } from './store';
+import { logDiag } from './diagnostics';
 
 export type Transport = 'native' | 'proxy' | 'direct';
 
@@ -36,6 +39,8 @@ export class TransportError extends Error {
     message: string,
     readonly status?: number,
     readonly transport?: Transport,
+    /** `true`, gdy ponowienie ma sens (timeout, 5xx, zerwane połączenie). */
+    readonly retryable = false,
   ) {
     super(message);
     this.name = 'TransportError';
@@ -47,12 +52,32 @@ function buildProxied(url: string, kind: 'forward' | 'media'): string {
   return `${base}/api/${kind}?url=${encodeURIComponent(url)}`;
 }
 
+/**
+ * `AbortSignal.timeout` nie istnieje w starszych WebView (Android 7–10 bez aktualizacji) —
+ * bez tego zapytania wisiałyby w nieskończoność i blokowały kolejkę.
+ */
+export function timeoutSignal(ms: number): AbortSignal {
+  const withTimeout = AbortSignal as typeof AbortSignal & { timeout?: (ms: number) => AbortSignal };
+  if (typeof withTimeout.timeout === 'function') {
+    try {
+      return withTimeout.timeout(ms);
+    } catch {
+      /* poniżej awaryjna ścieżka */
+    }
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new DOMException('timeout', 'TimeoutError')), ms);
+  return controller.signal;
+}
+
 async function nativeRequest(url: string, responseType?: 'blob' | 'text'): Promise<HttpResponse> {
   return CapacitorHttp.get({
     url,
     responseType,
+    connectTimeout: 15000,
+    readTimeout: 30000,
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 XOffline/0.1',
+      'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 XOffline/0.2',
       Accept: responseType === 'blob' ? '*/*' : 'application/json, text/html;q=0.9, */*;q=0.8',
     },
   });
@@ -70,31 +95,46 @@ function pickTransport(): Transport {
   return proxyEnabled() ? 'proxy' : 'direct';
 }
 
-/** Tekst/HTML/JSON jako string. */
-export async function fetchText(url: string, timeoutMs = 12000): Promise<string> {
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+async function once(url: string, timeoutMs: number): Promise<string> {
   const transport = pickTransport();
-  try {
-    if (transport === 'native') {
-      const res = await nativeRequest(url);
-      if (res.status >= 400) throw new TransportError(`HTTP ${res.status}`, res.status, transport);
-      return typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+  if (transport === 'native') {
+    const res = await nativeRequest(url);
+    if (res.status >= 400) {
+      throw new TransportError(`HTTP ${res.status}`, res.status, transport, RETRYABLE_STATUS.has(res.status));
     }
-    const target = transport === 'proxy' ? buildProxied(url, 'forward') : url;
-    const res = await fetch(target, { signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) throw new TransportError(`HTTP ${res.status}`, res.status, transport);
+    return typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+  }
+  const target = transport === 'proxy' ? buildProxied(url, 'forward') : url;
+  try {
+    const res = await fetch(target, { signal: timeoutSignal(timeoutMs), cache: 'no-store' });
+    if (!res.ok) throw new TransportError(`HTTP ${res.status}`, res.status, transport, RETRYABLE_STATUS.has(res.status));
     return await res.text();
   } catch (err) {
     if (transport === 'proxy' && isNetworkError(err)) {
-      // Serwer proxy niedostępny — ostatnia próba wprost.
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-        if (!res.ok) throw new TransportError(`HTTP ${res.status}`, res.status, 'direct');
-        return await res.text();
-      } catch (e2) {
-        throw asTransportError(e2, 'direct');
-      }
+      // Serwer proxy niedostępny — ostatnia próba wprost (czasem X jednak puści CORS).
+      const res = await fetch(url, { signal: timeoutSignal(timeoutMs) });
+      if (!res.ok) throw new TransportError(`HTTP ${res.status}`, res.status, 'direct');
+      return await res.text();
     }
     throw asTransportError(err, transport);
+  }
+}
+
+/** Tekst/HTML/JSON jako string. Jedno ponowienie dla błędów przejściowych. */
+export async function fetchText(url: string, timeoutMs = 12000): Promise<string> {
+  try {
+    return await once(url, timeoutMs);
+  } catch (err) {
+    const e = asTransportError(err, pickTransport());
+    if (!e.retryable) throw e;
+    await sleep(600 + Math.random() * 500);
+    try {
+      return await once(url, timeoutMs);
+    } catch (err2) {
+      throw asTransportError(err2, pickTransport());
+    }
   }
 }
 
@@ -109,40 +149,48 @@ export async function fetchBlob(url: string, timeoutMs = 45000): Promise<BlobRes
   const transport = pickTransport();
   const isLocal = url.startsWith('/') || url.startsWith('blob:') || url.startsWith('data:');
   if (isLocal) {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: timeoutSignal(timeoutMs) });
     const blob = await res.blob();
     return { blob, bytes: blob.size, mime: blob.type };
   }
-  try {
+  const attempt = async (): Promise<BlobResult> => {
     if (transport === 'native') {
       const res = await nativeRequest(url, 'blob');
-      if (res.status >= 400) throw new TransportError(`HTTP ${res.status}`, res.status, transport);
+      if (res.status >= 400) {
+        throw new TransportError(`HTTP ${res.status}`, res.status, transport, RETRYABLE_STATUS.has(res.status));
+      }
       const mime = String(res.headers?.['content-type'] ?? res.headers?.['Content-Type'] ?? 'image/jpeg');
       const data = res.data;
       const blob =
         typeof data === 'string' ?
           base64ToBlob(data, mime)
-        : data instanceof Blob ?
-          data
+        : data instanceof Blob ? data
         : new Blob([data as BlobPart], { type: mime });
       return { blob, bytes: blob.size, mime };
     }
     const target = transport === 'proxy' ? buildProxied(url, 'media') : url;
-    const res = await fetch(target, { signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) throw new TransportError(`HTTP ${res.status}`, res.status, transport);
-    const blob = await res.blob();
-    return { blob, bytes: blob.size, mime: blob.type || guessMime(url) };
-  } catch (err) {
-    if (transport === 'proxy' && isNetworkError(err)) {
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), mode: 'cors' });
+    try {
+      const res = await fetch(target, { signal: timeoutSignal(timeoutMs), mode: 'cors' });
+      if (!res.ok) throw new TransportError(`HTTP ${res.status}`, res.status, transport, RETRYABLE_STATUS.has(res.status));
+      const blob = await res.blob();
+      return { blob, bytes: blob.size, mime: blob.type || guessMime(url) };
+    } catch (err) {
+      if (transport === 'proxy' && isNetworkError(err)) {
+        const res = await fetch(url, { signal: timeoutSignal(timeoutMs), mode: 'cors' });
         const blob = await res.blob();
         return { blob, bytes: blob.size, mime: blob.type || guessMime(url) };
-      } catch (e2) {
-        throw asTransportError(e2, 'direct');
       }
+      throw asTransportError(err, transport);
     }
-    throw asTransportError(err, transport);
+  };
+
+  try {
+    return await attempt();
+  } catch (err) {
+    const e = asTransportError(err, transport);
+    if (!e.retryable) throw e;
+    await sleep(700 + Math.random() * 600);
+    return await attempt();
   }
 }
 
@@ -158,26 +206,38 @@ export function guessMime(url: string): string {
   return 'application/octet-stream';
 }
 
+export function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 function isNetworkError(err: unknown): boolean {
   const msg = String((err as Error)?.message ?? err);
-  return /failed to fetch|networkerror|load failed|ERR_|timeout|aborted/i.test(msg);
+  return /failed to fetch|networkerror|load failed|ERR_|timeout|aborted|abort/i.test(msg);
 }
 
 function asTransportError(err: unknown, transport: Transport): TransportError {
   if (err instanceof TransportError) return err;
   const msg = String((err as Error)?.message ?? err);
   const m = msg.match(/HTTP (\d{3})/);
-  return new TransportError(msg || 'Błąd sieci', m ? Number(m[1]) : undefined, transport);
+  const status = m ? Number(m[1]) : undefined;
+  return new TransportError(msg || 'Błąd sieci', status, transport, status ? RETRYABLE_STATUS.has(status) : isNetworkError(err));
 }
 
 /** Czy serwer proxy w ogóle żyje? (decyduje o komunikacie w UI) */
 export async function probeProxy(): Promise<{ ok: boolean; upstream?: string; error?: string }> {
   try {
-    const res = await fetch(`${apiBase()}/api/health`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${apiBase()}/api/health`, { signal: timeoutSignal(4000) });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const data = (await res.json()) as { ok?: boolean; upstream?: string };
     return { ok: Boolean(data.ok), upstream: data.upstream };
   } catch (err) {
-    return { ok: false, error: String((err as Error).message ?? err) };
+    const message = String((err as Error).message ?? err);
+    return { ok: false, error: message };
   }
+}
+
+/** Loguje nieudane pobranie do dziennika diagnostycznego (raz na dany URL). */
+export function noteTransportFailure(where: string, url: string, err: unknown): void {
+  const e = asTransportError(err, pickTransport());
+  logDiag('warn', `${where}: ${e.message} (${e.transport ?? 'brak'} · ${e.status ?? 'brak kodu'})`, url);
 }

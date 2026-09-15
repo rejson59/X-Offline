@@ -7,6 +7,11 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:hardwareAccelerated="true"
+        <!-- Duży sterta: w apce żyją dwa WebView (interfejs + podgląd x.com). Na słabszych
+             telefonach brak pamięci kończy się śmiercią renderera, a to właśnie ten błąd
+             przerabiamy na ekran „spróbuj ponownie” w XLiveActivity. -->
+        android:largeHeap="true"
         android:theme="@style/AppTheme">
 
         <activity
@@ -20,6 +25,32 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Udostępnianie z X (albo czegokolwiek innego): link wpada do kolejki pobierania -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- „Otwórz w X-Offline” — tylko dla linków do konkretnych postów,
+                 żeby apka nie przechwytywała zwykłego przeglądania x.com. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="x.com" android:pathPattern="/*/status/*" />
+                <data android:scheme="https" android:host="twitter.com" android:pathPattern="/*/status/*" />
+                <data android:scheme="https" android:host="x.com" android:pathPattern="/i/web/status/*" />
+                <data android:scheme="https" android:host="twitter.com" android:pathPattern="/i/web/status/*" />
+            </intent-filter>
+
+            <!-- Zaznacz tekst w innej apce → „X-Offline” -->
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
 
         </activity>
@@ -46,4 +77,6 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Bez tego sieć „mobilna” bywa traktowana jak roaming i pobieranie staje. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 </manifest>

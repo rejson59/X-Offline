@@ -24,6 +24,40 @@ OfflineBridge (@JavascriptInterface „AndroidXOffline”)  →  XLivePlugin.not
 apps/web/src/lib/bridge.ts → capture.ts (polityka zapisu) → IndexedDB (Dexie) + blobs (media)
 ```
 
+## API mostka (co dokładnie jest do dyspozycji z JS)
+
+```ts
+XLive.open({ tab: 'home' | 'bookmarks' | 'profile' | 'search', handle?, query?, url?,
+             capture?, autoScroll?, maxPosts?, scrollBatch? })   // → { ok, url }
+XLive.close()                                     // → { ok }  (kończy podgląd)
+XLive.status()                                    // → { open, captured, target, scrolling, loggedIn, info, url }
+XLive.replay([{ id, kind, tweetId, tweetUrl }])   // → { queued, raw }  (wynik przyjdzie eventem)
+XLive.consumeSharedIntent()                       // → { text, url, subject }  (raz — potem kolejka pusta)
+
+// zdarzenia (nasłuch przez addListener):
+'tweetsCaptured'  // { source, tweets: [...] } — to, co zbieracz wyciągnął z GraphQL
+'liveStatus'      // { info, collected, target } — licznik i powód zatrzymania przewijania
+'captureLog'      // { message } albo { error } — logi zbieracza i konsoli strony X
+'actionsDone'     // { results: [{ id, ok, error? }] } — wynik klikań w prawdziwym UI X
+'shareReceived'   // { text, url, subject } — link udostępniony apce, gdy JS już żyje
+```
+
+Strona JS siedzi w `apps/web/src/lib/bridge.ts` (`bridge.openLive/status/replayActions/startCapturing/
+startShareListener/installDevHook`), a polityka zapisu — w `capture.ts`.
+
+## Odporność (to naprawiało crashe APK)
+
+- **Renderer WebView padł?** `onRenderProcessGone` nie zabija procesu: `XLiveActivity` zwalnia WebView
+  i pokazuje ekran „dotknij, żeby spróbować ponownie”. Bez tego Android kończył całą apkę.
+- **Wszystko, co rusza WebView, idzie na wątek główny** (`webView.post` / `runOnUiThread`), bo mostek JS
+  woła nas z wątku JavaBridge; `evaluateJavascript` z obcego wątku to klasyczne źródło crashy i warningów.
+- **Duża sterta** (`android:largeHeap="true"` w manifeście) — w apce żyją dwa WebView (interfejs + x.com),
+  a na słabym telefonie brak pamięci kończył się właśnie śmiercią renderera.
+- **`notifyListeners` w kółko bezpieczny**: `XLivePlugin.forward` łapie wyjątki i po cichu odpuszcza,
+  gdy mostek już nie istnieje (zamknięcie apki w trakcie zbierania).
+- **Linki z systemu** (share sheet, `/status/…`, zaznaczony tekst) wpadają do kolejki `SharedIntent`
+  i czekają na `consumeSharedIntent()`, więc nic nie ginie, gdy apka startuje na zimno.
+
 ## Dlaczego podsłuch, a nie skrobanie DOM-u
 
 DOM X to `div`-y po generowanych klasach, które zmieniają się co kilka tygodni. Odpowiedzi GraphQL

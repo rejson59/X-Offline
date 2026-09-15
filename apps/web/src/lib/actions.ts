@@ -157,7 +157,7 @@ export async function maybeReplay(): Promise<{ sent: number; queued?: number; de
   if (!settings.replayActions) return { sent: 0, deferred: true, reason: 'wysyłanie wyłączone w ustawieniach' };
   if (!useSettings.getState().online) return { sent: 0, deferred: true, reason: 'brak łącza' };
   if (!isNative() || !bridge.available()) {
-    return { sent: 0, deferred: true, reason: 'wysyłka wymaga sesji X w aplikacji natywnej' };
+    return { sent: 0, deferred: true, reason: 'wysyłka wymaga sesji X w aplikacji natywnej (APK)' };
   }
   if (replaying) return { sent: 0, deferred: true, reason: 'wysyłka już leci' };
   replaying = true;

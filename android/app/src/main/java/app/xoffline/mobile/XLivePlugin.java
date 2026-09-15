@@ -13,12 +13,13 @@ import org.json.JSONTokener;
 /**
  * XLive — mostek JS ↔ natywny podgląd X.
  *
- *   XLive.open({ tab: 'home' | 'bookmarks' | 'profile' | 'search', handle, query,
+ *   XLive.open({ tab: 'home' | 'bookmarks' | 'profile' | 'search', handle, query, url,
  *               autoScroll, capture, maxPosts, scrollBatch })
  *   XLive.close()
- *   XLive.status()            → { open, collected, target, loggedIn, url }
- *   XLive.replay([{id,kind,tweetId,tweetUrl}])  → { queued }  (+ wynik jako event „actionsDone”)
- *   addListener('tweetsCaptured' | 'actionsDone' | 'liveStatus' | 'captureLog')
+ *   XLive.status()                 → { open, captured, target, loggedIn, url, scrolling, info }
+ *   XLive.replay([{id,kind,tweetId,tweetUrl}]) → { queued }  (+ wynik jako event „actionsDone”)
+ *   XLive.consumeSharedIntent()    → { text, url, subject } — link udostępniony apce z Androida
+ *   addListener('tweetsCaptured' | 'actionsDone' | 'liveStatus' | 'captureLog' | 'shareReceived')
  */
 @CapacitorPlugin(name = "XLive")
 public class XLivePlugin extends Plugin {
@@ -35,10 +36,13 @@ public class XLivePlugin extends Plugin {
         if (current == this) current = null;
     }
 
-    /** Przekazuje zdarzenie z WebView do świata JS. Bezpieczne, gdy plugin już nie żyje. */
+    /**
+     * Przekazuje zdarzenie z WebView do świata JS. Bezpieczne, gdy plugin już nie żyje
+     * albo mostek jest w trakcie zamykania — wcześniej wyjątek tutaj wywalał apkę.
+     */
     static void forward(String event, String payloadJson) {
         XLivePlugin plugin = current;
-        if (plugin == null || payloadJson == null) return;
+        if (plugin == null || payloadJson == null || event == null) return;
         try {
             Object parsed = new JSONTokener(payloadJson).nextValue();
             JSObject data = new JSObject();
@@ -46,10 +50,36 @@ public class XLivePlugin extends Plugin {
             else if (parsed instanceof JSONArray) data.put("payload", (JSONArray) parsed);
             else data.put("payload", payloadJson);
             plugin.notifyListeners(event, data);
-        } catch (Exception e) {
+        } catch (Exception first) {
+            try {
+                JSObject data = new JSObject();
+                data.put("payload", payloadJson);
+                plugin.notifyListeners(event, data);
+            } catch (Exception ignored) {
+                // Mostek zniknął w trakcie — nie ma komu tego pokazać, nie ma czego ratować.
+            }
+        }
+    }
+
+    /** Czy JS jest już podłączony (wtedy można wysyłać zdarzenia bez czekania na restart). */
+    static boolean isReady() {
+        return current != null;
+    }
+
+    /** Udostępnienie z Androida (share sheet) → event `shareReceived` dla JS. */
+    static void forwardShared(MainActivity.SharedIntent shared) {
+        XLivePlugin plugin = current;
+        if (plugin == null || shared == null) return;
+        try {
+            JSObject payload = new JSObject();
+            if (shared.text != null) payload.put("text", shared.text);
+            if (shared.url != null) payload.put("url", shared.url);
+            if (shared.subject != null) payload.put("subject", shared.subject);
             JSObject data = new JSObject();
-            data.put("payload", payloadJson);
-            plugin.notifyListeners(event, data);
+            data.put("payload", payload);
+            plugin.notifyListeners("shareReceived", data);
+        } catch (Exception ignored) {
+            // Mostek w trakcie zamykania — link zostaje w kolejce natywnej.
         }
     }
 
@@ -78,8 +108,11 @@ public class XLivePlugin extends Plugin {
 
     @PluginMethod
     public void close(PluginCall call) {
-        XLiveActivity activity = XLiveActivity.instance;
-        if (activity != null) activity.finishQuietly();
+        try {
+            XLiveActivity activity = XLiveActivity.instance;
+            if (activity != null) activity.finishQuietly();
+        } catch (Exception ignored) {
+        }
         JSObject ret = new JSObject();
         ret.put("ok", true);
         call.resolve(ret);
@@ -145,6 +178,19 @@ public class XLivePlugin extends Plugin {
                 });
     }
 
+    /** Oddaje raz to, co system wrzucił do apki (share sheet / „otwórz w…”). */
+    @PluginMethod
+    public void consumeSharedIntent(PluginCall call) {
+        JSObject ret = new JSObject();
+        MainActivity.SharedIntent shared = MainActivity.takeSharedIntent();
+        if (shared != null) {
+            if (shared.text != null) ret.put("text", shared.text);
+            if (shared.url != null) ret.put("url", shared.url);
+            if (shared.subject != null) ret.put("subject", shared.subject);
+        }
+        call.resolve(ret);
+    }
+
     private static boolean booleanOrDefault(PluginCall call, String key, boolean fallback) {
         try {
             Boolean value = call.getBoolean(key);
@@ -155,8 +201,12 @@ public class XLivePlugin extends Plugin {
     }
 
     private static int intOrDefault(PluginCall call, String key, int fallback) {
-        Integer value = call.getInt(key);
-        return value == null ? fallback : value;
+        try {
+            Integer value = call.getInt(key);
+            return value == null ? fallback : value;
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     /** evaluateJavascript zwraca stringa JSON-zacytowanego — trzeba go raz odwinąć. */

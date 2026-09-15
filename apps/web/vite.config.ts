@@ -10,7 +10,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['icons/favicon.svg', 'demo-media/*'],
+      includeAssets: ['icons/favicon.svg'],
       manifest: {
         id: '/',
         name: 'X-Offline — zapisane posty bez internetu',

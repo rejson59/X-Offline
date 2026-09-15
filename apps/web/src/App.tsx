@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/db/db';
 import { useSettings, type TabId } from '@/lib/store';
 import { useQueue } from '@/lib/download';
 import { usePwa } from '@/lib/pwa';
@@ -9,6 +11,7 @@ import { LiveTab } from './components/LiveTab';
 import { SettingsTab } from './components/SettingsTab';
 import { ActionsSheet, ImportSheet, QueueSheet, Toasts } from './components/Sheets';
 import { useActionList } from './lib/actionsView';
+import { useDiagnostics } from './lib/diagnostics';
 import {
   IconBookmark,
   IconDownload,
@@ -21,10 +24,10 @@ import {
 } from './components/Icons';
 
 const TITLES: Record<TabId, { title: string; sub: string }> = {
-  home: { title: 'X-Offline', sub: 'Twoja oś czasu, nawet bez łącza' },
-  live: { title: 'Na żywo', sub: 'Pobierz i zajrzyj do profilu' },
+  home: { title: 'X-Offline', sub: 'To, co pobrałeś z X — czytasz bez łącza' },
+  live: { title: 'Na żywo', sub: 'Pobieranie realnych postów i podgląd X' },
   offline: { title: 'Zapisane', sub: 'Działa w samolocie' },
-  settings: { title: 'Ustawienia', sub: 'Źródło danych, miejsce, czytanie' },
+  settings: { title: 'Ustawienia', sub: 'Źródło danych, miejsce, diagnostyka' },
 };
 
 export function App() {
@@ -43,6 +46,13 @@ export function App() {
   const [actionsOpen, setActionsOpen] = useState(false);
   const { stats } = useActionList();
   const [importOpen, setImportOpen] = useState(false);
+  const errorCount = useDiagnostics((s) => s.entries.filter((e) => e.kind === 'error').length);
+  // Ile zapisanych postów czeka na przeczytanie — widać od razu, z którejkolwiek zakładki.
+  const unread = useLiveQuery(
+    async () => (await db.posts.where('savedAt').above(0).toArray()).filter((p) => !p.readAt).length,
+    [],
+    0,
+  );
 
   useEffect(() => {
     if (offlineReady) toast('Aplikacja gotowa do pracy offline', 'ok');
@@ -71,6 +81,17 @@ export function App() {
             <IconBookmark style={{ width: 13, height: 13 }} />
             {plural(savedCount, 'post', 'posty', 'postów')}
           </span>
+        ) : null}
+
+        {errorCount ? (
+          <button
+            className="badge err"
+            onClick={() => setTab('settings')}
+            title={`${errorCount} wpisów z błędem w dzienniku — szczegóły w Ustawienia → Diagnostyka`}
+            style={{ border: 0, cursor: 'pointer' }}
+          >
+            {errorCount} {errorCount === 1 ? 'błąd' : 'błędy'}
+          </button>
         ) : null}
 
         <button
@@ -156,6 +177,15 @@ export function App() {
             {icon}
             <span>{label}</span>
             {running && id === 'live' ? <span className="dot" /> : null}
+            {unread && id === 'offline' && tab !== 'offline' ? (
+              <span
+                className="badge-count"
+                aria-hidden="true"
+                title={`${unread} nieprzeczytanych`}
+              >
+                {unread}
+              </span>
+            ) : null}
           </button>
         ))}
       </nav>

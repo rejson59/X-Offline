@@ -16,7 +16,7 @@ wklejasz sam, raz. Potem APK wychodzi z dwóch kliknięć.
    (otwórz plik → ikona „Copy raw content", żeby nie przenieść numerów linii).
 3. **Commit directly to the `main` branch** → zapisz.
 4. Zakładka **Actions** → **Android APK** → **Run workflow** →
-   `branch: arena/01a09eef-x-offline` (albo `main`, gdy PR będzie już scalony), `variant: debug` → **Run workflow**.
+   `branch: arena/01a0a3ea-x-offline` (albo `main`, gdy PR będzie już scalony), `variant: debug` → **Run workflow**.
 5. Po ~5–8 minutach: w podglądzie runa, na dole, sekcja **Artifacts** → **`x-offline-apk-debug`** → pobierz.
    W środku archiwum jest `x-offline-debug.apk` — ten plik instalujesz na telefonie (pkt 3 niżej).
 
@@ -49,13 +49,13 @@ Co robi workflow (`.github/workflows/android.yml`):
 5. `./gradlew assembleDebug` (albo `assembleRelease bundleRelease` dla wariantu `release`),
 6. artefakty: `x-offline-apk-debug/…apk` oraz `x-offline-pwa.zip`.
 
-Na tagu `v0.1.0` dodatkowo tworzy GitHub Release z `.apk` + `.aab`.
+Na tagu `v0.2.0` (albo jakimkolwiek `v*`) dodatkowo tworzy GitHub Release z `.apk` + `.aab`.
 
 Czyli pełna ścieżka do **linku z plikiem APK** (do wysłania komuś):
 
 ```bash
 npm run ci:install && git add -f .github/workflows && git commit -m "ci: pipeline" && git push
-git tag v0.1.0 && git push origin v0.1.0        # Actions zbuduje release i wrzuci APK do GitHub Releases
+git tag v0.2.0 && git push origin v0.2.0        # Actions zbuduje release i wrzuci APK do GitHub Releases
 ```
 
 ### Wariant release z Twoim podpisem (żeby dało się aktualizować)
@@ -120,28 +120,24 @@ najpierw odinstaluj starą wersję.
 | przycisk „wstecz”                 | —                                | zamyka czytnik / sheet, potem start, potem exit   |
 | aktualizacja apki                 | service worker (prompt w nagłówku) | reinstalacja APK (dane zostają)                 |
 
-## 5. Odbieranie udostępnionych linków w APK (opcjonalnie)
+## 5. Udostępnianie linków do apki (działa od razu)
 
-Po `npx cap add android` dodaj w `android/app/src/main/AndroidManifest.xml`, wewnątrz `<activity …>`:
+Manifest w repo ma już wszystkie potrzebne filtry, więc po instalacji działa:
 
-```xml
-<intent-filter>
-  <action android:name="android.intent.action.SEND" />
-  <category android:name="android.intent.category.DEFAULT" />
-  <data android:mimeType="text/plain" />
-</intent-filter>
-<intent-filter android:autoVerify="false">
-  <action android:name="android.intent.action.VIEW" />
-  <category android:name="android.intent.category.DEFAULT" />
-  <category android:name="android.intent.category.BROWSABLE" />
-  <data android:scheme="https" android:host="x.com" android:pathPattern="/..*/status/..*" />
-</intent-filter>
-```
+| Skąd                                                                 | Co się dzieje                                                       |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| „Udostępnij” w X / przeglądarce / dowolnej apce (tekst, `text/plain`)  | link wpada do kolejki pobierania (`/status/…` → post, reszta → podpowiedź) |
+| tapnięcie linku `x.com/*/status/…` („Otwórz w X-Offline”)              | to samo, bez otwierania przeglądarki                                |
+| zaznaczony tekst → menu → „X-Offline” (`PROCESS_TEXT`)                | to samo, nawet gdy nie ma tam linku (apka powie, czego brakuje)      |
 
-Intenty z `SEND` Capacitor podaje jako parametr `text` w starcie aplikacji — apka i tak je obsłuży,
-bo `src/main.tsx` czyta `?import=1&text=…` i wrzuca linki do kolejki. Żeby to zadziałało natywnie,
-w `MainActivity.java` wystarczy przekazać intencję do URL-a startowego (snippet w `capacitor.config.ts`
-komentarzu + `docs/DANE.md`).
+Wszystkie trzy ścieżki obsługuje `MainActivity.captureSharedIntent()`:
+
+- gdy apka już żyje i JS nasłuchuje → event `shareReceived` (mostek `XLivePlugin`),
+- gdy apka startuje na zimno → `SharedIntent` czeka w kolejce i `bridge.startShareListener()`
+  odbiera go przez `XLive.consumeSharedIntent()`.
+
+Nic nie ginie i nic nie trzeba dopisywać — jedyne, co warto wiedzieć, to że link bez `/status/…`
+(np. sam profil) nie jest pobierany: apka mówi wprost, że to nie post.
 
 ## 6. Rozwiązywanie problemów
 

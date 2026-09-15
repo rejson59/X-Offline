@@ -1,7 +1,7 @@
 {
   "name": "@x-offline/proxy",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Cienkie, tylko-do-czytania proxy dla X-Offline: omija CORS i buforuje odpowiedzi.",
   "main": "index.js",

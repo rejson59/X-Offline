@@ -93,10 +93,17 @@ export function libraryFileName(): string {
   return `xoffline-${new Date().toISOString().slice(0, 10)}.json`;
 }
 
-/** Rejestruje nasłuch cyklu życia w APK. W przeglądarce tylko network listeners. */
-export function initNativeBridges(onResume?: () => void): void {
+export interface NativeHooks {
+  onResume?: () => void;
+  /** Link wpadł z zewnątrz (deep link / share) — apka wrzuca go do kolejki. */
+  onLink?: (url: string) => void;
+}
+
+/** Rejestruje nasłuch cyklu życia w APK. W przeglądarce nic się nie dzieje. */
+export function initNativeBridges(hooks: NativeHooks | (() => void) = {}): void {
   const settings = useSettings.getState();
   if (!isNative()) return;
+  const { onResume, onLink } = typeof hooks === 'function' ? { onResume: hooks } : hooks;
 
   void CapApp.addListener('pause', () => settings.toast('Aplikacja w tle — zapisane posty zostają w pamięci', 'info'));
   void CapApp.addListener('resume', () => {
@@ -112,4 +119,10 @@ export function initNativeBridges(onResume?: () => void): void {
     }
     void CapApp.exitApp();
   });
+  if (onLink) {
+    void CapApp.addListener('appUrlOpen', (event) => {
+      const url = (event as { url?: string }).url;
+      if (url && /x\.com|twitter\.com/.test(url)) onLink(url);
+    });
+  }
 }

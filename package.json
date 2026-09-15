@@ -1,9 +1,9 @@
 {
   "name": "x-offline",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "X-Offline \u2014 przegl\u0105darka post\u00f3w X z pe\u0142nym trybem offline (PWA + Android APK przez Capacitor)",
+  "description": "X-Offline — przeglądarka postów X z pełnym trybem offline (PWA + Android APK przez Capacitor)",
   "workspaces": [
     "apps/web",
     "server"
@@ -16,7 +16,6 @@
     "typecheck": "npm run typecheck -w apps/web",
     "test": "npm run test -w apps/web",
     "preview": "npm run preview -w apps/web",
-    "demo:gen": "node scripts/gen-demo-data.mjs",
     "cap:sync": "npm run build && npx cap sync android && npm run native:sync",
     "cap:add:android": "npx cap add android",
     "apk:debug": "cd android && ./gradlew assembleDebug",

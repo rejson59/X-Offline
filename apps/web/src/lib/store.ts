@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { DEFAULT_SETTINGS, type Settings } from './types';
 import { loadSettings, saveSettings } from '@/db/db';
+import { logError } from './diagnostics';
 
 export type TabId = 'home' | 'live' | 'offline' | 'settings';
 
@@ -23,6 +24,13 @@ interface UiState {
 
 let saveTimer: number | undefined;
 
+function flushSettings(): void {
+  if (saveTimer === undefined) return;
+  window.clearTimeout(saveTimer);
+  saveTimer = undefined;
+  void saveSettings(useSettings.getState().settings).catch((err) => logError('zapis ustawień', err));
+}
+
 export const useSettings = create<UiState>((set, get) => ({
   settings: { ...DEFAULT_SETTINGS },
   hydrated: false,
@@ -33,9 +41,14 @@ export const useSettings = create<UiState>((set, get) => ({
   toasts: [],
 
   hydrate: async () => {
-    const stored = await loadSettings();
+    let stored: Settings = { ...DEFAULT_SETTINGS };
+    try {
+      stored = await loadSettings();
+    } catch (err) {
+      logError('odczyt ustawień', err);
+    }
     const envProxy = (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_XOFFLE_PROXY ?? '';
-    const settings = { ...stored, proxyUrl: stored.proxyUrl || envProxy };
+    const settings = { ...DEFAULT_SETTINGS, ...stored, proxyUrl: stored.proxyUrl || envProxy };
     set({ settings, hydrated: true });
     get().refreshNet();
   },
@@ -44,7 +57,10 @@ export const useSettings = create<UiState>((set, get) => ({
     const settings = { ...get().settings, ...partial };
     set({ settings });
     window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => void saveSettings(settings), 250);
+    saveTimer = window.setTimeout(() => {
+      saveTimer = undefined;
+      void saveSettings(settings).catch((err) => logError('zapis ustawień', err));
+    }, 250);
   },
 
   setTab: (tab) => set({ tab }),
@@ -75,10 +91,21 @@ export const useSettings = create<UiState>((set, get) => ({
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => useSettings.getState().refreshNet());
   window.addEventListener('offline', () => useSettings.getState().refreshNet());
+  // Debounce ustawień mógł jeszcze nie wystrzelić (np. użytkownik zamknął apkę) — dociągamy na wyjściu.
+  window.addEventListener('pagehide', flushSettings);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSettings();
+  });
 }
 
 export function shouldSkipMedia(): boolean {
   const { settings, netInfo, online } = useSettings.getState();
   if (!online) return true;
   return settings.respectSaveData && netInfo.saveData === true;
+}
+
+/** Czy w tym łączu wolno ruszać z pobieraniem (oszczędzanie danych, tryb offline)? */
+export function canFetchNow(): boolean {
+  const { online } = useSettings.getState();
+  return online;
 }
