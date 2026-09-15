@@ -1,6 +1,16 @@
 export type MediaKind = 'image' | 'video' | 'gif';
 
-export type PostSource = 'demo' | 'syndication' | 'manual' | 'library';
+/**
+ * Skąd pochodzi treść posta.
+ *
+ * Wcześniej istniało tu jeszcze `'demo'` (sztuczne posty generowane skryptem) — zostało
+ * usunięte: apka zapisuje wyłącznie to, co realnie przyszło z X. Wpisy demo z starszych
+ * wersji są czyszczone przy migracji bazy (patrz `db.ts`, wersja 3).
+ */
+export type PostSource = 'syndication' | 'manual' | 'library';
+
+/** Jak post trafił do bazy (kolejność wędrówki po apce). */
+export type PostOrigin = 'profile' | 'links' | 'live' | 'mirror' | 'import';
 
 export interface MediaItem {
   kind: MediaKind;
@@ -46,6 +56,8 @@ export interface PostRecord {
   createdAt: number;
   /** Ustawione, gdy post jest zapisany do czytania offline. */
   savedAt?: number | null;
+  /** Kiedy przeczytany w czytniku (null = nieprzeczytany). */
+  readAt?: number | null;
   stats: PostStats;
   media: MediaItem[];
   card?: PostLinkCard;
@@ -58,11 +70,15 @@ export interface PostRecord {
   tags?: string[];
   /** Kontekst pobrania (np. z profilu kogo). */
   fetchedFrom?: string;
+  /** Którym kanałem post wszedł do bazy. */
+  origin?: PostOrigin;
   /** Mirrored stany z X: polubienie / zakładka. */
   xLiked?: boolean;
   xBookmarked?: boolean;
   /** Jak post trafił do offline. */
   via?: 'manual' | 'auto-scroll' | 'bookmarks-mirror' | 'fill' | 'import';
+  /** Ostatni błąd pobierania mediów (do pokazania w UI). */
+  mediaError?: string;
   /** Kiedy ostatnio próbowaliśmy odtworzyć akcję w X. */
   actionError?: string;
 }
@@ -78,9 +94,11 @@ export interface AccountRow {
   savedCount?: number;
   /** Ile postów pobierać przy synchronizacji. */
   fetchCount?: number;
-  /** 'ok' | 'blocked' | 'empty' | 'error' */
+  /** 'ok' | 'blocked' | 'empty' | 'error' | 'imported' */
   lastStatus?: string;
   lastError?: string;
+  /** Skąd konto trafiło na listę: ręcznie czy z importu biblioteki. */
+  origin?: 'manual' | 'import';
 }
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
@@ -130,8 +148,11 @@ export interface BlobRow {
   blob: Blob;
 }
 
+/** Tryb pobierania z sieci — `demo` już nie istnieje, bo nie ma tu sztucznych danych. */
+export type SourceMode = 'auto' | 'proxy' | 'direct';
+
 export interface Settings {
-  sourceMode: 'auto' | 'demo' | 'proxy' | 'direct';
+  sourceMode: SourceMode;
   proxyUrl: string;
   /** Szablon URL-a dla zakładki „Na żywo”. {handle} = nazwa użytkownika. */
   liveFrameTemplate: string;
@@ -147,8 +168,12 @@ export interface Settings {
   /** Pełnoekranowy odtwarzacz w stylu pionowej szpulki. */
   reelMode: boolean;
   fontSize: number;
+  /** Prośba o trwałe miejsce w IndexedDB (system nie wyrzuci zapisanych postów). */
+  persistStorage: boolean;
+  /** Otwarcie posta w czytniku oznacza go jako przeczytany. */
+  markReadOnOpen: boolean;
 
-  // ——— auto-offline (to jest teraz rdzeń apki) ———
+  // ——— auto-offline (rdzeń apki) ———
   /** Zapisuj do offline każdy post napotkany w podglądzie na żywo. */
   autoCapture: boolean;
   /** Do ilu postów dokarmiać offline (50 / 100 / 200 / 500). */
@@ -165,7 +190,7 @@ export interface Settings {
   replayActions: boolean;
   /** Pobieraj media tylko na Wi-Fi (systemowe saveData też jest szanowane). */
   mediaOnWifiOnly: boolean;
-  /** Miękki limit: gdy offline ma >= autoTarget postów, przestań dokarmiać. */
+  /** Miękki limit: gdy offline ma >= autoTarget postów, przestajemy dokarmiać. */
   trimOverTarget: boolean;
   /** Lista kont, z których czytamy w przeglądarce (enter / przecinek). W APK zbieramy to, co widzisz. */
   followList: string;
@@ -183,6 +208,8 @@ export const DEFAULT_SETTINGS: Settings = {
   respectSaveData: true,
   reelMode: true,
   fontSize: 15,
+  persistStorage: true,
+  markReadOnOpen: true,
   autoCapture: true,
   autoTarget: 200,
   autoScroll: true,
@@ -192,5 +219,5 @@ export const DEFAULT_SETTINGS: Settings = {
   replayActions: true,
   mediaOnWifiOnly: false,
   trimOverTarget: false,
-  followList: 'kasia_koduje, silesia_dev, orbita_pl, foto_wegierek, low_bitrate, x_offline',
+  followList: '',
 };

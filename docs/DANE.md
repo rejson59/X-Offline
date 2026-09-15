@@ -61,8 +61,21 @@ export async function fetchPostsByLinks(links: string[], onEach?): Promise<Fetch
 
 `FetchResult` to `{ posts: PostRecord[]; upstream: string; error?: string; hint?: string }`.
 Najwygodniej: zbuduj posty przez `normalizeTweets(surowyJSON, 'syndication', { handle, count })` —
-albo zmapuj swoje dane wprost na `PostRecord` (patrz `src/lib/types.ts`, a jako wzór `scripts/gen-demo-data.mjs`).
-Reszta (cache mediów, limit miejsca, czytnik offline, eksport) zadziała bez zmian.
+albo zmapuj swoje dane wprost na `PostRecord` (patrz `src/lib/types.ts`; przyklad ponizej).
+Reszta (cache mediow, limit miejsca, czytnik offline, eksport) zadziala bez zmian.
+
+```ts
+import { upsertPosts } from '@/lib/posts';
+import type { PostRecord } from '@/lib/types';
+
+const post: PostRecord = {
+  id: 'moje:1', nativeId: '1', source: 'syndication',
+  authorHandle: 'ja', authorName: 'Ja', text: 'Treść z mojego źródła',
+  createdAt: Date.now(), savedAt: null, stats: { replies: 0, reposts: 0, likes: 0 },
+  media: [], sizeBytes: 0,
+};
+await upsertPosts([post]);
+```
 
 Jeśli chcesz źródło „na sztywno” bez edycji kodu: wgraj plik `.json` przez **Ustawienia → Biblioteka → Import
 biblioteki**. Format to po prostu wynik **Eksport offline** (`{ app: "x-offline", version: 1, posts: [...] }`).
@@ -81,18 +94,15 @@ Media są współdzielone między postami (klucz = hash URL-a), więc ten sam ob
 Przycinanie limitu (`pruneToCap`) usuwa **media** najstarszych zapisów, a treść posta zostaje — dalej da się go
 czytać, tylko bez zdjęć (dostaje plakietkę „brak pliku”).
 
-## Tryb demo
+## Zero danych zastępczych
 
-`npm run demo:gen` tworzy:
+Ta wersja nie ma zestawu demo ani generatora sztucznych postów. Wszystko, co widzisz w bibliotece,
+przyszło z X (podsłuch w APK, endpointy syndykacji, link do posta) albo z pliku, który sam
+zaimportowałeś — pusty stan oznacza po prostu pustą bazę i pokazuje, co zrobić, żeby ją zapełnić.
 
-- 34 posty na 6 fikcyjnych kontach (`apps/web/src/fixtures/demo-posts.json`),
-- 14 grafik + 3 animowane „klipy” jako SVG w `apps/web/public/demo-media/`.
-
-Dane są w pełni lokalne i generowane deterministycznie (seed 1337), więc:
-
-1. pokazują pełnię funkcji offline bez ani jednego żądania do X,
-2. działają w sandboxie / na CI / w samolocie,
-3. są sensownym fixture'em do testów (28 testów (logika + render)).
+Starsze wydania (0.1.x) wrzucały do bazy fikcyjne posty (`source: 'demo'`) i konta `demo:*`.
+Migracja Dexie v3 czyści je przy pierwszym uruchomieniu — biblioteka zawiera wyłącznie realne treści,
+a ustawienie „tylko demo” wraca do trybu `auto`.
 
 ## Gdy X coś zmieni — lista kontrolna
 

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/db';
-import { ensureDemoSeeded } from '@/lib/demo';
-import { ingestPosts, ingestTweets, savedOfflineCount } from '@/lib/capture';
+import { captureEvents, followHandles, ingestPosts, ingestTweets, savedOfflineCount } from '@/lib/capture';
 import { hasPendingFor, maybeReplay, reportResults, retryErrors, toggleBookmark, toggleLike } from '@/lib/actions';
 import { useSettings } from '@/lib/store';
 import { useFill } from '@/lib/autosync';
+import { makePost, mockNetwork } from './helpers';
 import type { NormalizedPost } from '@/lib/normalize';
 import type { PostRecord } from '@/lib/types';
 
@@ -27,10 +27,8 @@ function stubPosts(n: number, over: Partial<PostRecord> = {}): NormalizedPost[] 
 }
 
 beforeEach(async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => new Response(new Blob([new Uint8Array(512)], { type: 'image/png' }), { status: 200 })),
-  );
+  vi.unstubAllGlobals();
+  mockNetwork();
   await db.blobs.clear();
   await db.posts.clear();
   await db.accounts.clear();
@@ -40,7 +38,7 @@ beforeEach(async () => {
     online: true,
     settings: {
       ...useSettings.getState().settings,
-      sourceMode: 'demo',
+      sourceMode: 'auto',
       autoCapture: true,
       autoTarget: 5,
       storageCapMb: 0,
@@ -48,7 +46,9 @@ beforeEach(async () => {
       mirrorBookmarks: true,
       replayActions: true,
       mediaOnWifiOnly: false,
-      followList: 'orbita_pl, low_bitrate, x_offline',
+      trimOverTarget: false,
+      persistStorage: false,
+      followList: 'orbita_pl, nasa',
     },
   });
 });
@@ -69,17 +69,28 @@ describe('polityka auto-zapisu', () => {
     expect(await savedOfflineCount()).toBe(0);
   });
 
-  it('zakładka X omija limit celu', async () => {
+  it('zakładka X omija limit celu (ale tylko przy włączonej lustrzance)', async () => {
     await ingestPosts(stubPosts(5), { via: 'auto-scroll', source: 'live-scroll' });
-    const marked = stubPosts(1, {
-      id: 'syndication:12345',
-      nativeId: '12345',
-      xBookmarked: true,
-    } as Partial<PostRecord>) as NormalizedPost[];
+    const marked = stubPosts(1, { id: 'syndication:12345', nativeId: '12345' });
     marked[0].xBookmarked = true;
     const report = await ingestPosts(marked, { via: 'auto-scroll', source: 'live-scroll' });
     expect(report.saved).toBe(1);
     expect(await savedOfflineCount()).toBe(6);
+
+    // …a gdy lustrzanka jest wyłączona, zakładka nie rozpycha biblioteki poza cel
+    useSettings.setState({ settings: { ...useSettings.getState().settings, mirrorBookmarks: false } });
+    const other = stubPosts(1, { id: 'syndication:999', nativeId: '999' });
+    other[0].xBookmarked = true;
+    const second = await ingestPosts(other, { via: 'auto-scroll', source: 'live-scroll' });
+    expect(second.saved).toBe(0);
+  });
+
+  it('posty już zapisane nie liczą się drugi raz do celu', async () => {
+    await ingestPosts(stubPosts(3), { via: 'auto-scroll', source: 'live-scroll' });
+    const again = await ingestPosts(stubPosts(3), { via: 'auto-scroll', source: 'live-scroll' });
+    expect(again.saved).toBe(0);
+    expect(again.skipped).toBe(3);
+    expect(await savedOfflineCount()).toBe(3);
   });
 
   it('import z pliku nie przejmuje się limitem', async () => {
@@ -89,48 +100,49 @@ describe('polityka auto-zapisu', () => {
   });
 
   it('przy lustrzance w drugą stronę dokleja akcję „bookmark”', async () => {
-    useSettings.setState({
-      settings: { ...useSettings.getState().settings, autoTarget: 10, mirrorToBookmarks: true },
-    });
+    useSettings.setState({ settings: { ...useSettings.getState().settings, autoTarget: 10, mirrorToBookmarks: true } });
     await ingestPosts(stubPosts(2), { via: 'auto-scroll', source: 'live-scroll' });
     const rows = await db.actions.toArray();
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.kind === 'bookmark' && r.status === 'pending' && r.origin === 'mirror')).toBe(true);
   });
 
+  it('twarde przycięcie do celu odznacza najstarsze', async () => {
+    useSettings.setState({ settings: { ...useSettings.getState().settings, autoTarget: 3, trimOverTarget: true } });
+    await ingestPosts(stubPosts(6), { via: 'auto-scroll', source: 'live-scroll' });
+    expect(await savedOfflineCount()).toBe(3);
+  });
+
   it('ingestTweets ogarnia surowy payload z GraphQL (legacy + favorited)', async () => {
     const raw = {
-      entries: [
+      source: 'live-scroll',
+      tweets: [
         {
-          content: {
-            tweet: {
-              rest_id: '1111222233334444555',
-              core: {
-                user_results: {
-                  result: {
-                    legacy: {
-                      name: 'Orbita',
-                      screen_name: 'orbita_pl',
-                      profile_image_url_https: 'https://pbs.twimg.com/profile_images/1/a_normal.jpg',
-                    },
-                  },
+          rest_id: '1111222233334444555',
+          core: {
+            user_results: {
+              result: {
+                legacy: {
+                  name: 'Orbita',
+                  screen_name: 'orbita_pl',
+                  profile_image_url_https: 'https://pbs.twimg.com/profile_images/1/a_normal.jpg',
                 },
               },
-              legacy: {
-                id_str: '1111222233334444555',
-                full_text: undefined,
-                created_at: 'Tue Sep 01 09:12:00 +0000 2026',
-                favorite_count: 12,
-                favorited: true,
-                bookmarked: true,
-                extended_entities: { media: [{ type: 'photo', media_url_https: 'https://pbs.twimg.com/media/z.jpg' }] },
-              },
             },
+          },
+          legacy: {
+            id_str: '1111222233334444555',
+            created_at: 'Tue Sep 01 09:12:00 +0000 2026',
+            favorite_count: 12,
+            favorited: true,
+            bookmarked: true,
+            full_text: 'prawdziwy post z podglądu X',
+            extended_entities: { media: [{ type: 'photo', media_url_https: 'https://pbs.twimg.com/media/z.jpg' }] },
           },
         },
       ],
     };
-    const report = await ingestTweets(raw, { via: 'auto-scroll', source: 'live-scroll', maxPosts: 10 });
+    const report = await ingestTweets(raw, { via: 'auto-scroll', source: 'live-scroll', maxPosts: 10, origin: 'live' });
     expect(report.seen).toBe(1);
     expect(report.saved).toBe(1);
     const post = await db.posts.get('syndication:1111222233334444555');
@@ -138,13 +150,28 @@ describe('polityka auto-zapisu', () => {
     expect(post?.xLiked).toBe(true);
     expect(post?.xBookmarked).toBe(true);
     expect(post?.media).toHaveLength(1);
+    expect(post?.origin).toBe('live');
+  });
+
+  it('wpisuje realny profil na listę kont i zapisuje zdarzenie w dzienniku zbierania', async () => {
+    await ingestPosts(stubPosts(2), { via: 'auto-scroll', source: 'live-scroll', origin: 'live' });
+    const account = await db.accounts.get('orbita_pl');
+    expect(account?.lastStatus).toBe('ok');
+    expect(captureEvents().length).toBeGreaterThan(0);
+  });
+
+  it('lista profili czyta się z ustawień i ignoruje śmieci', () => {
+    useSettings.setState({
+      settings: { ...useSettings.getState().settings, followList: '@nasa, https://x.com/spacex/, zle-za-dlugie-nazwy!!, , ok_1' },
+    });
+    expect(followHandles()).toEqual(['nasa', 'spacex', 'ok_1']);
   });
 });
 
 describe('kolejka akcji (polub / zapisz teraz, wyślij później)', () => {
   async function onePost(): Promise<PostRecord> {
-    await ensureDemoSeeded(true);
-    const post = (await db.posts.orderBy('createdAt').last()) as PostRecord;
+    const post = makePost();
+    await db.posts.put(post);
     return post;
   }
 
@@ -214,7 +241,7 @@ describe('kolejka akcji (polub / zapisz teraz, wyślij później)', () => {
     const row = (await db.actions.toArray())[0];
     await db.actions.update(row.id as number, { status: 'error', error: 'sesja wygasła' });
     await db.posts.update(post.id, { actionError: 'sesja wygasła' });
-    expect((await retryErrors())).toBe(1);
+    expect(await retryErrors()).toBe(1);
     const again = (await db.actions.toArray())[0];
     await reportResults([{ id: again.id as number, ok: true }]);
     const after = await db.actions.get(again.id as number);
@@ -223,24 +250,26 @@ describe('kolejka akcji (polub / zapisz teraz, wyślij później)', () => {
   });
 });
 
-describe('dociąganie do celu (tryb przeglądarkowy, konta z listy)', () => {
-  it('uruchamia się, loguje postęp i zatrzymuje na limicie', async () => {
-    await ensureDemoSeeded(true);
-    useSettings.setState({
-      settings: { ...useSettings.getState().settings, autoTarget: 12, sourceMode: 'demo' },
-    });
-    await useFill.getState().start(12);
-    const saved = await savedOfflineCount();
-    expect(saved).toBeGreaterThanOrEqual(12);
+describe('edytor „dociągnij do celu” (tryb przeglądarkowy)', () => {
+  it('loguje brak profili zamiast zaciągać cokolwiek z sufitu', async () => {
+    useSettings.setState({ settings: { ...useSettings.getState().settings, followList: '', autoTarget: 10 } });
+    await useFill.getState().start(10);
     expect(useFill.getState().running).toBe(false);
-    expect(useFill.getState().log.length).toBeGreaterThan(0);
-    expect(useFill.getState().log.some((l) => l.text.includes('Gotowe') || l.text.includes('Zatrzymane'))).toBe(true);
-    const via = await db.posts.where('savedAt').above(0).toArray();
-    expect(via.every((p) => p.via === 'fill' || p.via === 'auto-scroll')).toBe(true);
+    expect(useFill.getState().error).toMatch(/Nie ma skąd czytać|profil/i);
+    expect(await savedOfflineCount()).toBe(0);
+  });
+
+  it('zatrzymuje się, gdy profili nie da się pobrać (brak proxy)', async () => {
+    mockNetwork({ fail: true });
+    useSettings.setState({ settings: { ...useSettings.getState().settings, followList: 'orbita_pl', autoTarget: 12 } });
+    await useFill.getState().start(12);
+    expect(useFill.getState().running).toBe(false);
+    expect(await savedOfflineCount()).toBe(0);
+    expect(useFill.getState().log.some((l) => l.kind === 'warn' || l.kind === 'error')).toBe(true);
   }, 20000);
 
   it('nie startuje drugi raz w trakcie pracy', async () => {
-    await ensureDemoSeeded(true);
+    useSettings.setState({ settings: { ...useSettings.getState().settings, followList: 'orbita_pl', autoTarget: 10 } });
     const first = useFill.getState().start(10);
     const second = useFill.getState().start(10);
     await Promise.all([first, second]);

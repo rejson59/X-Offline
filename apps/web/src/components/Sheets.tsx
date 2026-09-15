@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { pushBackHandler } from '@/lib/native';
 import { clearSent, discardAction, maybeReplay, retryErrors } from '@/lib/actions';
 import { useActionList } from '@/lib/actionsView';
@@ -7,7 +7,7 @@ import { isNative } from '@/lib/transport';
 import { jobHistory, useQueue } from '@/lib/download';
 import type { JobRow } from '@/lib/types';
 import { bytesLabel } from '@/lib/format';
-import { IconClose, IconDownload, IconExternal } from './Icons';
+import { IconClose, IconDownload, IconExternal, IconRefresh } from './Icons';
 
 export function Sheet({
   title,
@@ -102,11 +102,13 @@ export function ImportSheet({ onClose }: { onClose: () => void }) {
 
 export function QueueSheet({ onClose }: { onClose: () => void }) {
   const [history, setHistory] = useState<JobRow[]>([]);
+  const refreshHistory = useCallback(() => void jobHistory().then(setHistory), []);
   useEffect(() => {
-    void jobHistory().then(setHistory);
-  }, []);
+    refreshHistory();
+  }, [refreshHistory]);
   const tasks = useQueue((s) => s.tasks);
   const cancel = useQueue((s) => s.cancel);
+  const retry = useQueue((s) => s.retry);
   const cancelAll = useQueue((s) => s.cancelAll);
   const clearFinished = useQueue((s) => s.clearFinished);
   const running = tasks.some((t) => t.status === 'running' || t.status === 'queued');
@@ -118,7 +120,13 @@ export function QueueSheet({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       footer={
         <div className="row">
-          <button className="btn ghost grow" onClick={clearFinished}>
+          <button
+            className="btn ghost grow"
+            onClick={async () => {
+              clearFinished();
+              refreshHistory();
+            }}
+          >
             Wyczyść historię
           </button>
           <button className="btn danger grow" disabled={!running} onClick={cancelAll}>
@@ -166,11 +174,16 @@ export function QueueSheet({ onClose }: { onClose: () => void }) {
                 <button className="btn ghost small" onClick={() => cancel(t.id)}>
                   Anuluj
                 </button>
+              ) : t.status === 'error' || t.status === 'cancelled' ? (
+                <button className="btn ghost small" onClick={() => retry(t.id)}>
+                  <IconRefresh /> Ponów
+                </button>
               ) : null}
             </div>
             <div className="progress">
               <i style={{ width: `${t.status === 'done' ? 100 : pct}%` }} />
             </div>
+            {t.hint ? <div className="tiny dim" style={{ marginTop: 4 }}>💡 {t.hint}</div> : null}
             {t.errors.length ? (
               <details className="acc" style={{ marginTop: 2 }}>
                 <summary className="tiny">

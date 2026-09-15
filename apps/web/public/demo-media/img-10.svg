@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-<stop offset="0" stop-color="#04231c"/><stop offset=".55" stop-color="#0c5544"/><stop offset="1" stop-color="#2fd6a3"/>
-</linearGradient></defs>
-<rect width="1200" height="675" fill="url(#g)"/><circle cx="83" cy="138" r="29" fill="#2fd6a3" opacity="0.07"/><rect x="409" y="74" width="162" height="56.699999999999996" rx="24.3" fill="#fff" opacity="0.10" transform="rotate(-16 409 74)"/><rect x="174" y="216" width="380" height="133" rx="57" fill="#fff" opacity="0.10" transform="rotate(5 174 216)"/><circle cx="235" cy="406" r="72" fill="#2fd6a3" opacity="0.06"/><rect x="641" y="588" width="258" height="90.3" rx="38.699999999999996" fill="#fff" opacity="0.15" transform="rotate(8 641 588)"/><rect x="769" y="125" width="288" height="100.8" rx="43.199999999999996" fill="#fff" opacity="0.17" transform="rotate(13 769 125)"/><circle cx="975" cy="418" r="94" fill="#2fd6a3" opacity="0.27"/><rect x="120" y="144" width="116" height="40.599999999999994" rx="17.4" fill="#fff" opacity="0.07" transform="rotate(25 120 144)"/><rect x="465" y="532" width="302" height="105.69999999999999" rx="45.3" fill="#fff" opacity="0.15" transform="rotate(-30 465 532)"/>
-<g opacity=".9"></g>
-<text x="96" y="108" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="51" font-weight="700" fill="#fff" opacity=".95"></text>
-<text x="96" y="607.5" font-family="system-ui,sans-serif" font-size="27" fill="#fff" opacity=".7">demo-img-10 · zapisane lokalnie</text>
-</svg>

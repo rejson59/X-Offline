@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useResolvedMedia } from '@/hooks/useResolvedMedia';
 import { bytesLabel, fullTime, relativeTime } from '@/lib/format';
-import { unsavePosts } from '@/lib/posts';
+import { markRead, unsavePosts } from '@/lib/posts';
 import { pushBackHandler } from '@/lib/native';
 import { useSettings } from '@/lib/store';
 import type { PostRecord } from '@/lib/types';
@@ -22,6 +22,13 @@ function ReelItem({
   const resolved = useResolvedMedia(media);
   const [playing, setPlaying] = useState(false);
   const toast = useSettings((s) => s.toast);
+  const markReadOnOpen = useSettings((s) => s.settings.markReadOnOpen);
+
+  // Post, który realnie widzisz na ekranie, jest przeczytany — od razu, bez klikania.
+  useEffect(() => {
+    if (!active || !markReadOnOpen || !post.savedAt || post.readAt) return;
+    void markRead([post.id]);
+  }, [active, markReadOnOpen, post.id, post.savedAt, post.readAt]);
 
   async function act(kind: 'like' | 'bookmark') {
     const out = kind === 'like' ? await toggleLike(post) : await toggleBookmark(post);
@@ -60,6 +67,9 @@ function ReelItem({
   return (
     <section className="reel-item" aria-hidden={!active}>
       {media && media.kind !== 'video' ? <div className={portrait ? 'bg' : 'bg cover'} style={bgStyle} /> : null}
+      {media && media.kind === 'video' && active && !playing ? (
+        <div className="bg cover" style={media.poster ? { backgroundImage: `url(${media.poster})` } : undefined} />
+      ) : null}
       {media && media.kind === 'video' && active && playing ? (
         <video src={resolved.src} poster={media.poster} controls autoPlay playsInline onEnded={() => setPlaying(false)} />
       ) : null}

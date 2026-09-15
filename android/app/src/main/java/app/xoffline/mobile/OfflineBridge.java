@@ -45,7 +45,7 @@ public class OfflineBridge {
         });
     }
 
-    private static String quote(String s) {
+    static String quote(String s) {
         if (s == null) return "null";
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"";
     }
