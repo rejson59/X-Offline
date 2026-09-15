@@ -1,17 +1,16 @@
 /**
- * Przyjmowanie postów „z podsłuchu” (WebView w APK, import JSON, lustrzanka zakładek).
+ * Przyjmowanie postów z podglądu X (WebView w APK, import JSON, lustrzanka zakładek).
  * Tu mieszka polityka: co zapisujemy, kiedy przestajemy, kiedy odpuszczamy media.
  *
- * Zero danych zastępczych: jeśli nic nie przyszło z X, nic nie trafia do bazy.
+ * To jedyna droga postów do apki: jeśli nic nie przyszło z podglądu X, nic nie
+ * trafia do bazy. Zero danych zastępczych, zero API, zero profili do śledzenia.
  */
 import { db } from '@/db/db';
 import { normalizeTweets, type NormalizedPost } from './normalize';
 import { upsertPosts } from './posts';
-import { cachePostMedia, ensurePersistentStorage, trimSavedToTarget } from './media';
+import { cachePostMedia, ensurePersistentStorage } from './media';
 import { useSettings } from './store';
-import { enqueueAction } from './actions';
 import { logDiag } from './diagnostics';
-import { rememberAccount } from './posts';
 import type { PostOrigin, PostRecord } from './types';
 
 export interface CaptureReport {
@@ -29,7 +28,6 @@ export interface IngestOptions {
   source?: 'live-scroll' | 'bookmarks-mirror' | 'import';
   /** Omija `autoCapture` (używane przy ręcznym imporcie i świadomych ścieżkach). */
   force?: boolean;
-  handleHint?: string;
   /** Twardy sufit dla jednej partii. */
   maxPosts?: number;
   /** Którym kanałem post wszedł (UI pokazuje to w szczegółach). */
@@ -40,9 +38,6 @@ function shouldCacheMedia(): { yes: boolean; reason?: string } {
   const { settings, online, netInfo } = useSettings.getState();
   if (!online) return { yes: false, reason: 'brak łącza — zapisujemy sam tekst' };
   if (settings.respectSaveData && netInfo.saveData) return { yes: false, reason: 'system oszczędza dane' };
-  if (settings.mediaOnWifiOnly && /2g|3g/.test(netInfo.effectiveType ?? '')) {
-    return { yes: false, reason: 'media tylko na Wi-Fi' };
-  }
   return { yes: true };
 }
 
@@ -66,7 +61,7 @@ export async function ingestTweets(payload: unknown, opts: IngestOptions): Promi
   return await ingestPosts(posts, opts);
 }
 
-/** Ta sama polityka, ale dla już znormalizowanych postów (ścieżka „dociągnij do N”). */
+/** Ta sama polityka, ale dla już znormalizowanych postów. */
 export async function ingestPosts(posts: NormalizedPost[], opts: IngestOptions): Promise<CaptureReport> {
   const report: CaptureReport = { seen: posts.length, added: 0, saved: 0, skipped: 0, bytes: 0 };
   const settings = useSettings.getState().settings;
@@ -86,7 +81,6 @@ export async function ingestPosts(posts: NormalizedPost[], opts: IngestOptions):
   let saved = 0;
   let skipped = 0;
   let bytes = 0;
-  const handles = new Set<string>();
 
   for (const post of posts) {
     const existing = await db.posts.get(post.id);
@@ -95,10 +89,9 @@ export async function ingestPosts(posts: NormalizedPost[], opts: IngestOptions):
     const merged = await upsertPosts([{ ...post, origin: opts.origin ?? (isBookmarkMirror ? 'mirror' : 'live') }]);
     const row = merged[0];
     if (!row) continue;
-    handles.add(row.authorHandle);
 
-    // 2) decydujemy o zapisie offline. Rzeczy ważne (zakładka X, import, ręczny zapis)
-    //    wchodzą ponad cel — limit dotyczy tylko „zbierania przy przewijaniu”.
+    // 2) decydujemy o zapisie offline. Rzeczy ważne (zakładka X, import)
+    //    wchodzą ponad cel — limit dotyczy tylko zbierania przy przewijaniu.
     const bookmarked = Boolean(post.xBookmarked) && settings.mirrorBookmarks;
     const important = opts.via === 'import' || isBookmarkMirror || bookmarked;
     const alreadySaved = Boolean(existing?.savedAt);
@@ -117,12 +110,6 @@ export async function ingestPosts(posts: NormalizedPost[], opts: IngestOptions):
       const out = await cachePostMedia(row);
       bytes += out.bytes;
     }
-
-    // 3) lustrzanka w drugą stronę: nasze zapisanie = zakładka w X (gdy będzie łącze)
-    if (settings.mirrorToBookmarks && !row.xBookmarked) {
-      await db.posts.update(row.id, { xBookmarked: true });
-      await enqueueAction({ ...row, xBookmarked: true }, 'bookmark', 'mirror');
-    }
   }
 
   report.added = saved;
@@ -130,15 +117,10 @@ export async function ingestPosts(posts: NormalizedPost[], opts: IngestOptions):
   report.skipped = skipped;
   report.bytes = bytes;
 
-  if (settings.trimOverTarget) {
-    const trimmed = await trimSavedToTarget(settings.autoTarget);
-    if (trimmed) report.reason = `przycięto ${trimmed} najstarszych (limit ${settings.autoTarget})`;
-  }
-
   if (saved > 0) {
     void ensurePersistentStorage();
     noteCapture(
-      `zapisano ${saved} ${saved === 1 ? 'post' : 'postów'}${isBookmarkMirror ? ' z zakładek X' : ''}` +
+      `zapisano ${saved} ${saved === 1 ? 'post' : saved < 5 ? 'posty' : 'postów'}${isBookmarkMirror ? ' z zakładek X' : ''}` +
         `${bytes ? ` (${Math.round(bytes / 1024)} kB)` : ''}`,
       'ok',
     );
@@ -149,33 +131,10 @@ export async function ingestPosts(posts: NormalizedPost[], opts: IngestOptions):
     report.reason ??= wantMedia.reason;
   }
 
-  // Konto pojawia się na liście dopiero wtedy, gdy realnie coś od niego przyszło.
-  for (const handle of handles) await rememberAccount(handle, { lastStatus: 'ok', fetchCount: 25 });
-
-  await refreshCounters();
   return report;
 }
 
-async function refreshCounters(): Promise<void> {
-  const [{ refreshAccountCounts }, { useQueue }] = await Promise.all([import('./posts'), import('./download')]);
-  await refreshAccountCounts();
-  await useQueue.getState().refreshTotals();
-}
-
-/** Do czego służymy w trybie bez natywnego podglądu: lista kont z ustawień. */
-export function followHandles(): string[] {
-  const raw = useSettings.getState().settings.followList ?? '';
-  return [
-    ...new Set(
-      raw
-        .split(/[\s,;\n]+/)
-        .map((h) => h.trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, '').replace(/[/?#].*$/, ''))
-        .filter((h) => /^[A-Za-z0-9_]{1,15}$/.test(h)),
-    ),
-  ];
-}
-
-/** Log ostatniego zbierania — używane przez panel „na żywo” w APK. */
+/** Log ostatniego zbierania — używany przez zakładkę X. */
 export interface CaptureEvent {
   at: number;
   text: string;

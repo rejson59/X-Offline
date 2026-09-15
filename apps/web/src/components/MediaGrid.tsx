@@ -4,12 +4,12 @@ import type { MediaItem } from '@/lib/types';
 import { IconPlay } from './Icons';
 
 function MediaCell({ item, onOpen }: { item: MediaItem; onOpen?: () => void }) {
-  const { src, local } = useResolvedMedia(item);
+  const { src } = useResolvedMedia(item);
   const [playing, setPlaying] = useState(false);
-  const isVideo = item.kind === 'video' || item.kind === 'gif';
+  const [loaded, setLoaded] = useState(false);
 
   return (
-    <button type="button" className="media-cell" onClick={onOpen} aria-label="Otwórz media">
+    <button type="button" className="media-cell" onClick={onOpen} aria-label="Otwórz media" tabIndex={onOpen ? 0 : -1}>
       {item.kind === 'video' && playing ? (
         <video
           src={src}
@@ -22,24 +22,29 @@ function MediaCell({ item, onOpen }: { item: MediaItem; onOpen?: () => void }) {
         />
       ) : item.kind === 'video' ? (
         <>
-          <img src={item.poster ?? src} alt={item.alt ?? ''} loading="lazy" />
-          <span className="play">
+          <img
+            src={item.poster ?? src}
+            alt={item.alt ?? ''}
+            loading="lazy"
+            className={loaded ? 'is-loaded' : ''}
+            onLoad={() => setLoaded(true)}
+          />
+          <span className="play" aria-hidden>
             <span>
               <IconPlay />
             </span>
           </span>
+          {item.durationMs ? <span className="pill dur">{Math.round(item.durationMs / 1000)}s</span> : null}
         </>
       ) : (
-        <img src={src} alt={item.alt ?? ''} loading="lazy" />
+        <img
+          src={src}
+          alt={item.alt ?? ''}
+          loading="lazy"
+          className={loaded ? 'is-loaded' : ''}
+          onLoad={() => setLoaded(true)}
+        />
       )}
-      <span className="overlay">
-        {isVideo && item.durationMs ? <span className="pill">{Math.round(item.durationMs / 1000)}s</span> : null}
-        {local ? (
-          <span className="pill local">offline</span>
-        ) : (
-          <span className="pill remote">tylko online</span>
-        )}
-      </span>
     </button>
   );
 }

@@ -247,7 +247,7 @@ export async function pruneToCap(capMb: number, keepPosts: number): Promise<Prun
 /**
  * Awaryjne zwalnianie miejsca, gdy IndexedDB odmawia zapisu (`QuotaExceededError`).
  *
- * `pruneToCap` respektuje okno `pruneKeepPosts` — a gdy telefon jest pełny, nie ma czego
+ * `pruneToCap` respektuje okno najnowszych postów — a gdy telefon jest pełny, nie ma czego
  * oszczędzać: zrzucamy media od najstarszych zapisów, aż uzbiera się `targetBytes`.
  * Zasada bez zmian: giną pliki, teksty postów zostają (czytasz dalej, tylko bez grafiki).
  */

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useResolvedMedia } from '@/hooks/useResolvedMedia';
-import { bytesLabel, fullTime, relativeTime } from '@/lib/format';
+import { fullTime } from '@/lib/format';
 import { markRead, unsavePosts } from '@/lib/posts';
 import { pushBackHandler } from '@/lib/native';
 import { useSettings } from '@/lib/store';
@@ -24,29 +24,25 @@ function ReelItem({
   const toast = useSettings((s) => s.toast);
   const markReadOnOpen = useSettings((s) => s.settings.markReadOnOpen);
 
-  // Post, który realnie widzisz na ekranie, jest przeczytany — od razu, bez klikania.
   useEffect(() => {
     if (!active || !markReadOnOpen || !post.savedAt || post.readAt) return;
     void markRead([post.id]);
   }, [active, markReadOnOpen, post.id, post.savedAt, post.readAt]);
 
   async function act(kind: 'like' | 'bookmark') {
-    const out = kind === 'like' ? await toggleLike(post) : await toggleBookmark(post);
-    toast(
-      `${kind === 'like' ? 'Polubienie' : 'Zakładka'}: ${out.kind.startsWith('un') ? 'cofnięte' : 'dodane'} — w kolejce do X`,
-      'info',
-    );
+    if (kind === 'like') await toggleLike(post);
+    else await toggleBookmark(post);
   }
 
   const portrait = Boolean(media?.width && media?.height && media.height > media.width);
-  const bgStyle = media ?
-    {
-      backgroundImage: `url(${media.kind === 'video' ? (media.poster ?? (resolved.local ? resolved.src : '')) : resolved.src})`,
-    }
-  : undefined;
+  const bgStyle = media
+    ? {
+        backgroundImage: `url(${media.kind === 'video' ? (media.poster ?? (resolved.local ? resolved.src : '')) : resolved.src})`,
+      }
+    : undefined;
 
   async function share() {
-    const payload = `${post.text}\n\n— @${post.authorHandle}, X-Offline${post.url ? `\n${post.url}` : ''}`;
+    const payload = `${post.text}\n\n— @${post.authorHandle}${post.url ? `\n${post.url}` : ''}`;
     const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
     if (nav.share) {
       try {
@@ -60,7 +56,7 @@ function ReelItem({
       await navigator.clipboard.writeText(payload);
       toast('Skopiowano treść posta', 'ok');
     } catch {
-      toast('Nie da się skopiować w tym kontekście', 'error');
+      toast('Nie da się skopiować w tym miejscu', 'error');
     }
   }
 
@@ -78,13 +74,10 @@ function ReelItem({
         <button className="icon-btn" onClick={onClose} aria-label="Zamknij czytnik">
           <IconClose />
         </button>
-        <div className="grow row tight wrap">
+        <div className="grow reel-author">
           <b>{post.authorName}</b>
-          <span className="dim small">@{post.authorHandle}</span>
-          {post.savedAt ? <span className="badge ok">offline</span> : <span className="badge">niezapisane</span>}
-          {media && !resolved.local && media.kind !== 'video' ? <span className="badge warn">brak pliku</span> : null}
+          <span className="dim">@{post.authorHandle}</span>
         </div>
-        <div className="grow" />
         {post.media.length > 1 ? <span className="pill">+{post.media.length - 1}</span> : null}
       </div>
 
@@ -100,19 +93,11 @@ function ReelItem({
             <p className="post-text" style={{ marginTop: 0 }}>
               {renderText(post.text)}
             </p>
-            <div className="row wrap tiny dim" style={{ marginTop: 8 }}>
-              <span>{fullTime(post.createdAt)}</span>
-              <span>·</span>
-              <span>{post.stats.likes.toLocaleString('pl-PL')} polubień</span>
-              {post.sizeBytes ? (
-                <>
-                  <span>·</span>
-                  <span>{bytesLabel(post.sizeBytes)} w pamięci</span>
-                </>
-              ) : null}
+            <div className="tiny dim" style={{ marginTop: 8 }}>
+              {fullTime(post.createdAt)} · {post.stats.likes.toLocaleString('pl-PL')} polubień
             </div>
           </div>
-          <div className="row tight" style={{ flexDirection: 'column' }}>
+          <div className="reel-rail">
             <button className="icon-btn" onClick={share} aria-label="Udostępnij">
               <IconShare />
             </button>
@@ -122,8 +107,8 @@ function ReelItem({
               </a>
             ) : null}
             <button
-              className={`icon-btn${post.xLiked ? ' liked' : ''}`}
-              aria-label={post.xLiked ? 'Cofnij polubienie' : 'Polub (wyślemy później)'}
+              className="icon-btn"
+              aria-label={post.xLiked ? 'Cofnij polubienie' : 'Polub'}
               style={post.xLiked ? { color: 'var(--like)' } : undefined}
               onClick={() => void act('like')}
             >
@@ -131,7 +116,7 @@ function ReelItem({
             </button>
             <button
               className="icon-btn"
-              aria-label={post.xBookmarked ? 'Usuń z zakładek X' : 'Dodaj do zakładek X'}
+              aria-label={post.xBookmarked ? 'Usuń z zakładek' : 'Dodaj do zakładek'}
               style={post.xBookmarked ? { color: 'var(--accent)' } : undefined}
               onClick={() => void act('bookmark')}
             >
@@ -142,8 +127,8 @@ function ReelItem({
                 className="icon-btn"
                 aria-label="Usuń z offline"
                 onClick={async () => {
-                  const freed = await unsavePosts([post.id]);
-                  toast(`Usunięto z offline (${bytesLabel(freed)})`, 'info');
+                  await unsavePosts([post.id]);
+                  toast('Usunięto z offline', 'info');
                 }}
               >
                 <IconQueue />
@@ -156,7 +141,10 @@ function ReelItem({
   );
 }
 
-/** Pionowy czytnik „jak TikTok” dla zapisanych postów. Swipe/snap = natywne zachowanie przeglądarki. */
+/**
+ * Pionowy czytnik zapisanych postów. Renderuje tylko okno wokół aktywnego posta,
+ * żeby lista 500 zapisów nie dławiła telefonu.
+ */
 export function Reel({
   posts,
   startIndex = 0,
@@ -202,8 +190,11 @@ export function Reel({
 
   if (!posts.length) return null;
 
+  const lo = Math.max(0, index - 1);
+  const hi = Math.min(posts.length, index + 3);
+
   return (
-    <div className="reel" role="dialog" aria-modal="true" aria-label="Czytnik offline">
+    <div className="reel" role="dialog" aria-modal="true" aria-label="Czytnik">
       <div
         className="reel-scroll"
         ref={ref}
@@ -213,32 +204,16 @@ export function Reel({
           if (next !== index) setIndex(Math.max(0, Math.min(posts.length - 1, next)));
         }}
       >
-        {posts.map((post, i) => (
-          <ReelItem key={post.id} post={post} active={i === index} onClose={onClose} />
+        {lo > 0 ? <div style={{ height: `${lo * 100}dvh`, flex: 'none' }} aria-hidden /> : null}
+        {posts.slice(lo, hi).map((post, k) => (
+          <ReelItem key={post.id} post={post} active={lo + k === index} onClose={onClose} />
         ))}
+        {hi < posts.length ? <div style={{ height: `${(posts.length - hi) * 100}dvh`, flex: 'none' }} aria-hidden /> : null}
       </div>
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 'calc(10px + env(safe-area-inset-bottom, 0px))',
-          left: 0,
-          right: 0,
-          display: 'flex',
-          justifyContent: 'center',
-          pointerEvents: 'none',
-        }}
-      >
-        <div className="row tight" style={{ background: 'rgba(0,0,0,.5)', borderRadius: 999, padding: '5px 10px' }}>
-          <span className="tiny dim">
-            {index + 1} / {posts.length} · swipe lub ↑↓
-          </span>
-          <span className="reel-dots">
-            {posts.slice(Math.max(0, index - 3), Math.min(posts.length, index + 4)).map((p, i) => (
-              <i key={p.id} className={Math.max(0, index - 3) + i === index ? 'on' : ''} />
-            ))}
-          </span>
-          <span className="tiny dim">{relativeTime(posts[index]?.createdAt ?? Date.now())}</span>
-        </div>
+      <div className="reel-counter">
+        <span>
+          {index + 1} / {posts.length}
+        </span>
       </div>
     </div>
   );

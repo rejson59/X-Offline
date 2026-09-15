@@ -1,16 +1,13 @@
 export type MediaKind = 'image' | 'video' | 'gif';
 
 /**
- * Skąd pochodzi treść posta.
- *
- * Wcześniej istniało tu jeszcze `'demo'` (sztuczne posty generowane skryptem) — zostało
- * usunięte: apka zapisuje wyłącznie to, co realnie przyszło z X. Wpisy demo z starszych
- * wersji są czyszczone przy migracji bazy (patrz `db.ts`, wersja 3).
+ * Skąd pochodzi treść posta. Zawsze z X — apka nie generuje żadnych
+ * sztucznych treści ani nie pobiera nic z żadnych API/proxy.
  */
 export type PostSource = 'syndication' | 'manual' | 'library';
 
 /** Jak post trafił do bazy (kolejność wędrówki po apce). */
-export type PostOrigin = 'profile' | 'links' | 'live' | 'mirror' | 'import';
+export type PostOrigin = 'live' | 'mirror' | 'import' | 'profile' | 'links';
 
 export interface MediaItem {
   kind: MediaKind;
@@ -148,24 +145,19 @@ export interface BlobRow {
   blob: Blob;
 }
 
-/** Tryb pobierania z sieci — `demo` już nie istnieje, bo nie ma tu sztucznych danych. */
-export type SourceMode = 'auto' | 'proxy' | 'direct';
-
+/**
+ * Ustawienia — celowo mały zestaw. Apka ma robić jedną rzecz dobrze:
+ * zbierać posty z podglądu X (WebView) i dawać je do czytania offline.
+ */
 export interface Settings {
-  sourceMode: SourceMode;
-  proxyUrl: string;
-  /** Szablon URL-a dla zakładki „Na żywo”. {handle} = nazwa użytkownika. */
-  liveFrameTemplate: string;
   /** Miękki limit miejsca w MB (0 = bez limitu). */
   storageCapMb: number;
   autoPrune: boolean;
-  pruneKeepPosts: number;
-  autoSyncOnOpen: boolean;
   /** Pobieraj wideo (potrafią ważyć 5-20 MB). */
   downloadVideo: boolean;
   /** Ogranicz pobieranie przy oszczędzaniu danych w systemie. */
   respectSaveData: boolean;
-  /** Pełnoekranowy odtwarzacz w stylu pionowej szpulki. */
+  /** Pełnoekranowy czytnik w stylu pionowej szpulki. */
   reelMode: boolean;
   fontSize: number;
   /** Prośba o trwałe miejsce w IndexedDB (system nie wyrzuci zapisanych postów). */
@@ -173,37 +165,20 @@ export interface Settings {
   /** Otwarcie posta w czytniku oznacza go jako przeczytany. */
   markReadOnOpen: boolean;
 
-  // ——— auto-offline (rdzeń apki) ———
-  /** Zapisuj do offline każdy post napotkany w podglądzie na żywo. */
+  // ——— zbieranie z podglądu X ———
+  /** Zapisuj do offline każdy post napotkany w podglądzie. */
   autoCapture: boolean;
-  /** Do ilu postów dokarmiać offline (50 / 100 / 200 / 500). */
+  /** Do ilu postów zbierać (50 / 100 / 200 / 500). */
   autoTarget: number;
   /** Samo przewijanie w podglądzie, aż zbierze się partia postów. */
   autoScroll: boolean;
-  /** Rozmiar jednej porcji przy auto-przewijaniu (ile ekranów na raz). */
-  scrollBatch: number;
   /** Traktuj zakładki X (bookmarks) jako źródło postów do offline. */
   mirrorBookmarks: boolean;
-  /** Odwrotnie: to, co zapiszesz w X-Offline, dodaj też do zakładek X (gdy będzie łącze). */
-  mirrorToBookmarks: boolean;
-  /** Wysyłaj zaległe polubienia/zakładki, gdy tylko apka złapie łącze. */
-  replayActions: boolean;
-  /** Pobieraj media tylko na Wi-Fi (systemowe saveData też jest szanowane). */
-  mediaOnWifiOnly: boolean;
-  /** Miękki limit: gdy offline ma >= autoTarget postów, przestajemy dokarmiać. */
-  trimOverTarget: boolean;
-  /** Lista kont, z których czytamy w przeglądarce (enter / przecinek). W APK zbieramy to, co widzisz. */
-  followList: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  sourceMode: 'auto',
-  proxyUrl: '',
-  liveFrameTemplate: 'https://syndication.twitter.com/srv/timeline-profile/screen-name/{handle}',
   storageCapMb: 256,
   autoPrune: true,
-  pruneKeepPosts: 300,
-  autoSyncOnOpen: false,
   downloadVideo: true,
   respectSaveData: true,
   reelMode: true,
@@ -213,11 +188,5 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCapture: true,
   autoTarget: 200,
   autoScroll: true,
-  scrollBatch: 8,
   mirrorBookmarks: true,
-  mirrorToBookmarks: false,
-  replayActions: true,
-  mediaOnWifiOnly: false,
-  trimOverTarget: false,
-  followList: '',
 };

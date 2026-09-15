@@ -3,9 +3,9 @@ import type { CapacitorConfig } from '@capacitor/cli';
 /**
  * Konfiguracja natywnego pudełka (Android / iOS) dla X-Offline.
  *
- * Kluczowa sprawa: `CapacitorHttp.enabled = true` sprawia, że `fetch()` w aplikacji idzie
- * przez sieć natywną. Dzięki temu pobieranie postów z publicznych endpointów X działa
- * bez żadnego serwera proxy i bez walki z CORS — to dlatego APK ma więcej mocy niż PWA.
+ * Kluczowa sprawa: `CapacitorHttp.enabled = true` sprawia, że pobieranie plików mediów
+ * w aplikacji idzie przez sieć natywną (bez walki z CORS). Same posty przychodzą
+ * wyłącznie z podglądu X (WebView z Twoją sesją) — nie ma żadnego API ani serwera.
  */
 const config: CapacitorConfig = {
   appId: 'app.xoffline.mobile',

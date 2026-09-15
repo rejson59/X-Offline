@@ -153,8 +153,6 @@ export async function requeue(ids: Array<number | undefined>): Promise<void> {
 }
 
 export async function maybeReplay(): Promise<{ sent: number; queued?: number; deferred: boolean; reason?: string }> {
-  const settings = useSettings.getState().settings;
-  if (!settings.replayActions) return { sent: 0, deferred: true, reason: 'wysyłanie wyłączone w ustawieniach' };
   if (!useSettings.getState().online) return { sent: 0, deferred: true, reason: 'brak łącza' };
   if (!isNative() || !bridge.available()) {
     return { sent: 0, deferred: true, reason: 'wysyłka wymaga sesji X w aplikacji natywnej (APK)' };

@@ -3,14 +3,14 @@ import { DEFAULT_SETTINGS, type Settings } from './types';
 import { loadSettings, saveSettings } from '@/db/db';
 import { logError } from './diagnostics';
 
-export type TabId = 'home' | 'live' | 'offline' | 'settings';
+export type TabId = 'feed' | 'x' | 'settings';
 
 interface UiState {
   settings: Settings;
   hydrated: boolean;
   tab: TabId;
   online: boolean;
-  /** 'slow' | 'ok' | 'offline' — heurystyka do badge'a w nagłówku. */
+  /** 'slow' | 'ok' | 'offline' — heurystyka do kropki w nagłówku. */
   link: 'offline' | 'slow' | 'ok';
   netInfo: { downlink?: number; effectiveType?: string; saveData?: boolean; rtt?: number };
   toasts: { id: number; text: string; kind: 'info' | 'ok' | 'warn' | 'error' }[];
@@ -34,7 +34,7 @@ function flushSettings(): void {
 export const useSettings = create<UiState>((set, get) => ({
   settings: { ...DEFAULT_SETTINGS },
   hydrated: false,
-  tab: 'home',
+  tab: 'feed',
   online: typeof navigator === 'undefined' ? true : navigator.onLine,
   link: typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'ok',
   netInfo: {},
@@ -47,9 +47,7 @@ export const useSettings = create<UiState>((set, get) => ({
     } catch (err) {
       logError('odczyt ustawień', err);
     }
-    const envProxy = (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_XOFFLE_PROXY ?? '';
-    const settings = { ...DEFAULT_SETTINGS, ...stored, proxyUrl: stored.proxyUrl || envProxy };
-    set({ settings, hydrated: true });
+    set({ settings: { ...DEFAULT_SETTINGS, ...stored }, hydrated: true });
     get().refreshNet();
   },
 
@@ -67,8 +65,8 @@ export const useSettings = create<UiState>((set, get) => ({
 
   toast: (text, kind = 'info') => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
-    set({ toasts: [...get().toasts, { id, text, kind }] });
-    window.setTimeout(() => get().dropToast(id), 4200);
+    set({ toasts: [...get().toasts.slice(-2), { id, text, kind }] });
+    window.setTimeout(() => get().dropToast(id), 3600);
   },
 
   dropToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
