@@ -113,8 +113,8 @@ export function initNativeBridges(hooks: NativeHooks | (() => void) = {}): void 
   void CapApp.addListener('backButton', () => {
     if (consumeBack()) return;
     const st = useSettings.getState();
-    if (st.tab !== 'home') {
-      st.setTab('home');
+    if (st.tab !== 'feed') {
+      st.setTab('feed');
       return;
     }
     void CapApp.exitApp();

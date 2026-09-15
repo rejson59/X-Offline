@@ -49,11 +49,10 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children;
     return (
       <div className="section" style={{ paddingTop: 24 }}>
-        <div className="banner err" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
           <b>Coś się wysypało w interfejsie</b>
-          <div className="small">
-            Zapisane posty są bezpieczne — to błąd wyświetlania, nie danych. Wróć do startu, a szczegóły trafiły do
-            Ustawienia → Diagnostyka.
+          <div className="small dim">
+            Zapisane posty są bezpieczne — to błąd wyświetlania, nie danych. Szczegóły trafiły do dziennika w ustawieniach.
           </div>
           <pre className="tiny dim" style={{ whiteSpace: 'pre-wrap', margin: 0, maxHeight: 160, overflow: 'auto' }}>
             {error.message}
@@ -62,10 +61,10 @@ export class ErrorBoundary extends Component<Props, State> {
             <button className="btn primary small" onClick={() => this.setState({ error: null })}>
               Wróć do aplikacji
             </button>
-            <button className="btn ghost small" onClick={() => void this.copyReport()}>
+            <button className="btn quiet small" onClick={() => void this.copyReport()}>
               Skopiuj raport
             </button>
-            <button className="btn ghost small" onClick={() => location.reload()}>
+            <button className="btn quiet small" onClick={() => location.reload()}>
               Przeładuj apkę
             </button>
           </div>

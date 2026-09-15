@@ -1,17 +1,15 @@
 {
   "name": "x-offline",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "X-Offline — przeglądarka postów X z pełnym trybem offline (PWA + Android APK przez Capacitor)",
+  "description": "X-Offline — posty z X zapisane z podglądu (WebView) do czytania offline (PWA + Android APK przez Capacitor)",
   "workspaces": [
-    "apps/web",
-    "server"
+    "apps/web"
   ],
   "scripts": {
-    "dev": "concurrently -n web,proxy -c cyan,magenta \"npm:dev:web\" \"npm:dev:server\"",
+    "dev": "npm run dev -w apps/web",
     "dev:web": "npm run dev -w apps/web",
-    "dev:server": "npm run dev -w server",
     "build": "npm run build -w apps/web",
     "typecheck": "npm run typecheck -w apps/web",
     "test": "npm run test -w apps/web",
@@ -24,9 +22,6 @@
     "verify:android": "node scripts/verify-android.mjs",
     "ci:install": "bash scripts/install-ci.sh",
     "native:sync": "node scripts/sync-native-assets.mjs"
-  },
-  "devDependencies": {
-    "concurrently": "^9.1.0"
   },
   "engines": {
     "node": ">=20.11"

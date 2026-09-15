@@ -1,115 +1,45 @@
 # Skąd apka bierze dane
 
-## Czego używamy (i dlaczego)
+Krótko: **wyłącznie z podglądu X (WebView)**. Nie ma żadnego API, serwera ani proxy.
 
-Oficjalne API X v2 ma darmowy plan „nic poza postowaniem”, a czytanie osi czasu kosztuje krocie.
-Zamiast tego apka korzysta z **publicznych endpointów syndykacji** — tych samych, które renderują
-osadzone posty i widgety na tysiącach stron.
+## Jedyna droga postów
 
-| Endpoint                                                                | Zwrot                     | Zastosowanie w apce                       |
-| ----------------------------------------------------------------------- | ------------------------- | ----------------------------------------- |
-| `GET https://cdn.syndication.twimg.com/tweet-result?id=…&token=…`        | JSON pojedynczego posta   | import z linków, pojedyncze zapisy         |
-| `GET https://cdn.syndication.twimg.com/timeline/profile?screen_name=…`   | JSON (bywa 404)            | „pobierz N ostatnich postów” — ścieżka nr 1 |
-| `GET https://syndication.twitter.com/srv/timeline-profile/screen-name/…`  | HTML z `__NEXT_DATA__`     | to samo, ścieżka nr 2 (parser w `normalize.ts`) |
-| `pbs.twimg.com/media/…`, `video.twimg.com/…mp4`                           | obraz / wideo              | pliki do cache’u w IndexedDB                |
-| `platform.twitter.com/embed/Tweet.html?id=…`                              | HTML (do osadzania)         | podgląd w ramce, gdy osadzone timeline padną |
+1. W APK otwierasz zakładkę **X** — to natywny WebView na prawdziwym x.com, z Twoimi
+   ciasteczkami. Logujesz się tam normalnie, jak w przeglądarce.
+2. Wstrzyknięty zbieracz (`apps/web/public/inject/xoffline-capture.js`, kopia w
+   `android/app/src/main/assets/inject/`) podsłuchuje odpowiedzi, które X i tak wysyła
+   do strony (pełne tweety: autor, tekst, media, stan polubień/zakładek).
+3. Każdy wyłapany post przechodzi przez `capture.ts` (polityka: cel, priorytety) i ląduje
+   w IndexedDB razem z mediami ściągniętymi jako binarki.
+4. Czytanie w „Zapisanych” nie wykonuje **żadnych** żądań sieciowych — wszystko jest lokalne.
 
-`token` dla `tweet-result` wyliczamy dokładnie tak, jak widget X:
+W przeglądarce (PWA) nie ma podglądu z sesją, więc nie ma też zbierania — PWA służy do
+czytania biblioteki zebranej w APK (przenosisz ją eksportem/importem kopii `.json`).
 
-```js
-((id / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, '')   // src/lib/normalize.ts → syndicationToken()
-```
+## Co się dzieje z mediami
+
+- Zdjęcia i klipy ściągamy jako pliki i trzymamy w IndexedDB (`blobs`).
+- W APK pobranie idzie siecią natywną (`CapacitorHttp`), w PWA zwykłym `fetch()`.
+- Gdy plik się nie pobierze, **tekst posta i tak zostaje** — media dociągniesz później
+  jednym przyciskiem („Dociągnij media” w ustawieniach albo ikona przy poście).
 
 ## Ograniczenia, które trzeba zaakceptować
 
-- **Nieudokumentowane i dawkowane.** X potrafi zmienić kształt odpowiedzi albo odesłać
-  „Nothing to see here - yet” (częste dla kont bez weryfikacji i dla żądań bez sesji).
-  Z tego względu: normalizacja jest defensywna, a wszystko, co raz pobrane, leży lokalnie —
-  **czytanie offline nie zależy od X w żadnym stopniu**.
-- **CORS.** Przeglądarka nie przeczyta tych odpowiedzi wprost. Dlatego PWA używa proxy (`server/index.js`
-  albo `cloudflare/worker.mjs`), a APK korzysta z `CapacitorHttp` (sieć natywna → brak limitów CORS).
-- **Tylko to, co publiczne.** Zero logowania, zero DM-ów, zero kont prywatnych, zero wątków
-  (zgodnie z założeniem: zapisujemy główne posty).
-- **Prawo / regulamin.** Endpointy nie są w umowie deweloperskiej. Pobierasz publicznie dostępne treści
-  do własnego użytku, na własną odpowiedzialność; nie sprzedawaj tego i nie buduj na tym serwera treści dla innych.
+- **Zbieranie wymaga otwartego podglądu.** Apka zapisuje tylko to, co realnie mija Twój
+  wzrok (albo co przewinie auto-scroll). Nic nie dzieje się w tle.
+- **Tylko główne posty.** Odpowiedzi i wątki pomijamy — zapisujemy to, co ma samodzielną treść.
+- **X może zmienić stronę.** Zbieracz czyta odpowiedzi w kilku znanych kształtach
+  (GraphQL + syndykacja) i jest odporny na drobne zmiany, ale grubsza przebudowa x.com
+  może wymagać aktualizacji skryptu. Testy w `inject.test.ts` pilnują kontraktu.
+- **Prawo / regulamin.** Zapisujesz treści widoczne dla Ciebie, do własnego użytku,
+  na własną odpowiedzialność. Nie buduj na tym serwera treści dla innych.
 
-## Jak to przetestować bez apki
+## Jak to przetestować bez telefonu
 
-```bash
-# zdrowie proxy + dostępność X
-curl -s localhost:8787/api/health | jq
-
-# ostatnie posty profilu (znormalizuje je apka, nie proxy)
-curl -s "localhost:8787/api/timeline/nasa?count=10" | head -c 400
-
-# pojedynczy post po linku
-curl -s "localhost:8787/api/tweet/20" | jq '.text, .user.screen_name, .created_at'
-
-# media przez proxy (przyda się, gdy pbs.twimg.com nie puści Ci CORS-u)
-curl -sI "localhost:8787/api/media?url=https://pbs.twimg.com/media/XXXX.jpg" | head -5
+```js
+// w konsoli apki — wrzuć posty w kształcie GraphQL prosto do bazy:
+await window.__xoffline.ingest(JSON.stringify({ tweets: [/* … */] }));
 ```
 
-## Jak dodać własne źródło (np. swoje API, plik, RSS)
-
-Wystarczy spełnić kontrakt `sources.ts`:
-
-```ts
-// src/lib/sources.ts
-export async function fetchProfile(handle: string, count: number): Promise<FetchResult>
-export async function fetchPostsByLinks(links: string[], onEach?): Promise<FetchResult>
-```
-
-`FetchResult` to `{ posts: PostRecord[]; upstream: string; error?: string; hint?: string }`.
-Najwygodniej: zbuduj posty przez `normalizeTweets(surowyJSON, 'syndication', { handle, count })` —
-albo zmapuj swoje dane wprost na `PostRecord` (patrz `src/lib/types.ts`; przyklad ponizej).
-Reszta (cache mediow, limit miejsca, czytnik offline, eksport) zadziala bez zmian.
-
-```ts
-import { upsertPosts } from '@/lib/posts';
-import type { PostRecord } from '@/lib/types';
-
-const post: PostRecord = {
-  id: 'moje:1', nativeId: '1', source: 'syndication',
-  authorHandle: 'ja', authorName: 'Ja', text: 'Treść z mojego źródła',
-  createdAt: Date.now(), savedAt: null, stats: { replies: 0, reposts: 0, likes: 0 },
-  media: [], sizeBytes: 0,
-};
-await upsertPosts([post]);
-```
-
-Jeśli chcesz źródło „na sztywno” bez edycji kodu: wgraj plik `.json` przez **Ustawienia → Biblioteka → Import
-biblioteki**. Format to po prostu wynik **Eksport offline** (`{ app: "x-offline", version: 1, posts: [...] }`).
-
-## Co dokładnie trafia do IndexedDB
-
-```
-posts    — treść, autor, data, statystyki, lista mediów, tagi, savedAt, sizeBytes
-blobs    — binarki (zdjęcie/klip) keyed po URL-u, z MIME i rozmiarem
-accounts — profile: ostatnia synchronizacja, auto-sync, licznik zapisów
-jobs     — historia kolejki pobrań (status, postęp, błędy)
-meta     — ustawienia użytkownika
-```
-
-Media są współdzielone między postami (klucz = hash URL-a), więc ten sam obrazek w 20 postach zajmuje jedno miejsce.
-Przycinanie limitu (`pruneToCap`) usuwa **media** najstarszych zapisów, a treść posta zostaje — dalej da się go
-czytać, tylko bez zdjęć (dostaje plakietkę „brak pliku”).
-
-## Zero danych zastępczych
-
-Ta wersja nie ma zestawu demo ani generatora sztucznych postów. Wszystko, co widzisz w bibliotece,
-przyszło z X (podsłuch w APK, endpointy syndykacji, link do posta) albo z pliku, który sam
-zaimportowałeś — pusty stan oznacza po prostu pustą bazę i pokazuje, co zrobić, żeby ją zapełnić.
-
-Starsze wydania (0.1.x) wrzucały do bazy fikcyjne posty (`source: 'demo'`) i konta `demo:*`.
-Migracja Dexie v3 czyści je przy pierwszym uruchomieniu — biblioteka zawiera wyłącznie realne treści,
-a ustawienie „tylko demo” wraca do trybu `auto`.
-
-## Gdy X coś zmieni — lista kontrolna
-
-1. `curl` health proxy → `upstream: "http-404"` albo `unreachable` → endpoint padł, nie Twoja apka.
-2. Padł `timeline/profile`? Apka i tak spróbuje `timeline-profile` (HTML) — sprawdź `parseNextData()` na świeżym
-   `curl` tej strony.
-3. Zmienił się kształt posta? Złap jeden `tweet-result` i porównaj pola z `normalizeTweet()`.
-   To jedno miejsce do poprawki — reszta apki żyje z `PostRecord`.
-4. Media 403? X lubi wymagać `Referer`/`User-Agent` — to się ustawia w `server/index.js` (`UPSTREAM_UA`) i w `fetchBlob`.
-5. Zawsze zostaje ścieżka manualna: wrzucasz link (albo eksport własnej kopii), apka zapisuje, czytnik działa.
+W podglądzie X (APK, chrome://inspect): `window.__xofflineStatus()` pokaże, ile zebrano
+i dlaczego ewentualnie stanęło.

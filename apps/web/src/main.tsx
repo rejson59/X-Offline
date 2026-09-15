@@ -3,16 +3,13 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './styles/app.css';
-import { useSettings } from './lib/store';
-import { useQueue } from './lib/download';
+import { useSettings, type TabId } from './lib/store';
 import { usePwa } from './lib/pwa';
 import { db, dbReady, setMeta } from './db/db';
-import { refreshAccountCounts, rememberAccount } from './lib/posts';
 import { tweetIdFromUrl } from './lib/normalize';
 import { initNativeBridges } from './lib/native';
 import { bridge } from './lib/bridge';
 import { maybeReplay } from './lib/actions';
-import { shouldAutoFillOnOpen, useFill } from './lib/autosync';
 import { installGlobalErrorHandlers, logDiag, logError, useDiagnostics } from './lib/diagnostics';
 import { ensurePersistentStorage } from './lib/media';
 
@@ -37,8 +34,23 @@ function renderFatal(detail: string): void {
     </div>`;
 }
 
-function toast0(text: string): void {
-  useSettings.getState().toast(text, 'info');
+/**
+ * Link do posta X z zewnątrz (udostępnianie, deep link) otwieramy w podglądzie X —
+ * to jedyna droga treści do apki. W przeglądarce (bez podglądu) pokazujemy podpowiedź.
+ */
+async function openSharedLink(url: string): Promise<void> {
+  const st = useSettings.getState();
+  if (!tweetIdFromUrl(url)) {
+    if (url.trim()) st.toast('Ten link nie wygląda na post z X.', 'warn');
+    return;
+  }
+  const res = await bridge.openLive({ url });
+  if (!res.ok) {
+    st.toast('Linki z X otwieramy w aplikacji (APK) — tam zapisują się do offline.', 'info');
+    st.setTab('x');
+    return;
+  }
+  st.toast('Otwieram post w podglądzie X', 'ok');
 }
 
 async function boot(): Promise<void> {
@@ -54,8 +66,6 @@ async function boot(): Promise<void> {
 
   await settings.hydrate();
   await useDiagnostics.getState().hydrate();
-  await refreshAccountCounts().catch((err) => logError('liczniki kont', err));
-  await useQueue.getState().refreshTotals().catch((err) => logError('liczniki biblioteki', err));
   await usePwa.getState().init();
 
   // „Trwałe” miejsce: bez tego Android może wyrzucić zapisane posty przy braku miejsca.
@@ -63,29 +73,13 @@ async function boot(): Promise<void> {
     if (ok) logDiag('info', 'system przyznał trwałe miejsce na dane apki');
   });
 
-  // Linki z zewnątrz (share sheet / deep link) → kolejka pobierania.
-  const enqueueLinks = async (links: string[], why: string) => {
-    const clean = links.filter((l) => tweetIdFromUrl(l));
-    if (!clean.length) {
-      if (links.some((l) => l.trim())) {
-        settings.toast('Ten link nie wygląda na post z X (potrzebny adres z /status/…).', 'warn');
-      }
-      return;
-    }
-    await useQueue.getState().enqueueLinks(clean);
-    settings.toast(`${why}: ${clean.length} ${clean.length === 1 ? 'link' : 'linki'} w kolejce`, 'ok');
-    useSettings.getState().setTab('home');
-  };
-
   initNativeBridges({
     onResume: () => {
-      void refreshAccountCounts();
-      void useQueue.getState().refreshTotals();
       void maybeReplay().then((r) => {
         if (r.queued) settings.toast(`Wysyłam zaległe akcje do X: ${r.queued}`, 'info');
       });
     },
-    onLink: (url) => void enqueueLinks([url], 'Z udostępniania'),
+    onLink: (url) => void openSharedLink(url),
   });
 
   // Mostek z natywnym podglądem X: posty przy przewijaniu lecą prosto do offline.
@@ -93,7 +87,9 @@ async function boot(): Promise<void> {
   await bridge.startCapturing();
   await bridge.startShareListener((shared) => {
     const text = [shared.url, shared.text, shared.subject].filter(Boolean).join(' ');
-    void enqueueLinks(text.split(/[\s,;]+/), 'Z udostępniania');
+    const first = text.split(/[\s,;]+/).find((part) => tweetIdFromUrl(part));
+    if (first) void openSharedLink(first);
+    else if (text.trim()) settings.toast('Udostępnij apce link do posta X (adres z /status/…).', 'warn');
   });
 
   // Łącze wróciło? Wyślij, co czekało.
@@ -108,40 +104,25 @@ async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const shared = params.get('url') || params.get('text') || params.get('title');
   if (params.get('import') === '1' && shared) {
-    await enqueueLinks(shared.split(/[\s,;]+/), 'Z udostępniania');
+    const first = shared.split(/[\s,;]+/).find((part) => tweetIdFromUrl(part));
+    if (first) await openSharedLink(first);
     history.replaceState({}, '', location.pathname);
   }
 
-  // 2) Pierwsze uruchomienie: nie ma czym się chwalić, więc mówimy wprost co zrobić.
-  const [savedCount, accountCount] = await Promise.all([db.posts.where('savedAt').above(0).count(), db.accounts.count()]);
-  if (!savedCount && !accountCount) {
+  // 2) Pierwsze uruchomienie: krótko mówimy, co zrobić.
+  const savedCount = await db.posts.where('savedAt').above(0).count();
+  if (!savedCount) {
     const seen = await db.meta.get('firstRunTip');
     if (!seen) {
       await setMeta('firstRunTip', Date.now());
-      settings.toast('Zacznij od „Na żywo”: dodaj profil albo otwórz X w podglądzie (APK zbiera, co przewiniesz).', 'info');
+      settings.toast('Otwórz zakładkę X i przewiń trochę — posty zapiszą się same.', 'info');
     }
   }
 
-  // 3) Auto-dokarmianie offline przy starcie (żeby rano w pociągu było co czytać).
-  if (await shouldAutoFillOnOpen()) {
-    toast0('Dociągam partię postów do offline…');
-    void useFill.getState().start();
-  }
-
+  // 3) Deep link do zakładki (?tab=x). Stare nazwy mapujemy na nowe.
   const tab = params.get('tab');
-  if (tab === 'offline' || tab === 'live' || tab === 'home' || tab === 'settings') settings.setTab(tab);
-
-  // 4) Opcjonalne odświeżenie zapisanych kont przy starcie.
-  if (useSettings.getState().settings.autoSyncOnOpen && navigator.onLine) {
-    const accounts = await db.accounts.toArray();
-    const marked = accounts.filter((a) => a.autoSync).map((a) => a.handle);
-    const handles = marked.length ? marked : accounts.slice(0, 3).map((a) => a.handle);
-    for (const h of handles) await rememberAccount(h, { fetchCount: 25 });
-    if (handles.length) {
-      await useQueue.getState().enqueueProfile(handles, 25);
-      settings.toast(`Aktualizuję zapisane profile: ${handles.map((h) => `@${h}`).join(', ')}`, 'info');
-    }
-  }
+  const map: Record<string, TabId> = { feed: 'feed', x: 'x', settings: 'settings', home: 'feed', offline: 'feed', live: 'x' };
+  if (tab && map[tab]) settings.setTab(map[tab]);
 }
 
 const rootEl = document.getElementById('root');

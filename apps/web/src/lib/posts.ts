@@ -4,6 +4,9 @@ import { logDiag } from './diagnostics';
 import { useSettings } from './store';
 import type { PostRecord } from './types';
 
+/** Ile najnowszych zapisów omija auto-czyszczenie (stała, nie ustawienie). */
+const PRUNE_KEEP_POSTS = 300;
+
 /**
  * Wstawia/aktualizuje posty, zachowując to, co już zostało pobrane do offline.
  *
@@ -62,7 +65,7 @@ async function writePostRow(row: PostRecord): Promise<void> {
     // 2) Dopiero potem zwykłe przycinanie do limitu — gdyby tamto nie miało czego zrzucić.
     if (!freed) {
       const { settings } = useSettings.getState();
-      freed = (await pruneToCap(settings.storageCapMb || 256, Math.max(0, settings.pruneKeepPosts))).bytes;
+      freed = (await pruneToCap(settings.storageCapMb || 256, PRUNE_KEEP_POSTS)).bytes;
     }
     logDiag('warn', `brakło miejsca na zapis — zwolniłem ${freed} B`);
     try {
@@ -95,7 +98,7 @@ export interface SaveOutcome {
  * Zapis posta + mediów do offline.
  *
  * Kolejność ma znaczenie: najpierw oznaczamy post jako zapisany (tekst jest w bazie od razu,
- * nawet bez sieci), potem dociągamy media. Dzięki temu „Zapisane” nigdy nie jest puste,
+ * nawet bez sieci), potem dociągamy media. Dzięki temu lista nigdy nie jest pusta,
  * a nieudane media da się później dociągnąć jednym kliknięciem („brakujące media”).
  */
 export async function saveOffline(post: PostRecord, signal?: AbortSignal): Promise<SaveOutcome> {
@@ -130,7 +133,6 @@ export async function saveOffline(post: PostRecord, signal?: AbortSignal): Promi
   const fresh = (await db.posts.get(post.id)) ?? post;
   const pending = await uncachedMediaOf(fresh);
 
-  await refreshAccountCounts();
   if (!outcome.cached && outcome.errors.length) {
     logDiag('info', `zapisano sam tekst @${post.authorHandle}`, outcome.errors.join('\n'));
   }
@@ -146,7 +148,7 @@ export async function saveOffline(post: PostRecord, signal?: AbortSignal): Promi
 
 /**
  * Dociąga brakujące media dla wskazanych (albo wszystkich) zapisanych postów.
- * Używane przez „Dociągnij brakujące” w kolejce i po powrocie łącza.
+ * Używane przez „Dociągnij brakujące” i po powrocie łącza.
  */
 export async function fetchMissingMedia(ids?: string[]): Promise<{ posts: number; bytes: number; failed: number }> {
   const rows =
@@ -166,7 +168,6 @@ export async function fetchMissingMedia(ids?: string[]): Promise<{ posts: number
     failed += out.skipped;
     await new Promise((r) => setTimeout(r, 120));
   }
-  await refreshAccountCounts();
   return { posts, bytes, failed };
 }
 
@@ -184,14 +185,12 @@ export async function unsavePosts(ids: string[]): Promise<number> {
       });
     }
   });
-  await refreshAccountCounts();
   return freed;
 }
 
 export async function deletePosts(ids: string[]): Promise<void> {
   await dropMediaFor(ids);
   await db.posts.bulkDelete(ids);
-  await refreshAccountCounts();
 }
 
 /** Oznacza posty jako przeczytane / nieprzeczytane. */
@@ -207,44 +206,8 @@ export async function countUnread(): Promise<number> {
   return saved.filter((p) => !p.readAt).length;
 }
 
-/** Kiedy ostatnio czytaliśmy cokolwiek — do „Czytaj dalej”. */
-export async function lastRead(): Promise<PostRecord | undefined> {
-  const saved = await db.posts.where('savedAt').above(0).toArray();
-  return saved
-    .filter((p) => p.readAt)
-    .sort((a, b) => (b.readAt ?? 0) - (a.readAt ?? 0))[0];
-}
-
-export async function refreshAccountCounts(): Promise<void> {
-  const rows = await db.posts.where('savedAt').above(0).toArray();
-  const byHandle = new Map<string, number>();
-  for (const p of rows) byHandle.set(p.authorHandle, (byHandle.get(p.authorHandle) ?? 0) + 1);
-  const accounts = await db.accounts.toArray();
-  for (const acc of accounts) {
-    const saved = byHandle.get(acc.handle) ?? 0;
-    if (saved !== acc.savedCount) await db.accounts.update(acc.handle, { savedCount: saved });
-  }
-}
-
 export function savedPostsQuery() {
   return db.posts.where('savedAt').above(0);
-}
-
-/** Zapamiętuje realny profil na liście kont (kolejka i auto-dociąganie jej używają). */
-export async function rememberAccount(
-  handle: string,
-  patch: Partial<{ name: string; avatar: string; description: string; followers: number; lastStatus: string; lastError?: string; fetchCount: number }> = {},
-): Promise<void> {
-  const existing = await db.accounts.get(handle);
-  await db.accounts.put({
-    handle,
-    origin: existing?.origin ?? 'manual',
-    autoSync: existing?.autoSync ?? true,
-    fetchCount: existing?.fetchCount ?? patch.fetchCount ?? 25,
-    ...existing,
-    ...patch,
-    lastSyncAt: patch.lastStatus === 'ok' ? Date.now() : (existing?.lastSyncAt ?? null),
-  });
 }
 
 export interface LibraryExport {
@@ -257,13 +220,14 @@ export interface LibraryExport {
 
 export async function exportLibrary(): Promise<LibraryExport> {
   const posts = await db.posts.where('savedAt').above(0).toArray();
-  const accounts = await db.accounts.toArray();
+  const seen = new Map<string, string>();
+  for (const p of posts) if (!seen.has(p.authorHandle)) seen.set(p.authorHandle, p.authorName);
   return {
     app: 'x-offline',
     version: 2,
     exportedAt: new Date().toISOString(),
     posts,
-    accounts: accounts.map((a) => ({ handle: a.handle, name: a.name })),
+    accounts: [...seen.entries()].map(([handle, name]) => ({ handle, name })),
   };
 }
 
@@ -323,12 +287,6 @@ export async function importLibrary(payload: unknown): Promise<{ posts: number; 
       failed += out.skipped;
     }
   }
-  if (Array.isArray(lib.accounts)) {
-    for (const acc of lib.accounts) {
-      if (acc?.handle) await rememberAccount(acc.handle, { name: acc.name, lastStatus: 'imported' });
-    }
-  }
-  await refreshAccountCounts();
   void ensurePersistentStorage();
   return { posts: saved, bytes, failed };
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '@/App';
 import { db } from '@/db/db';
@@ -35,27 +35,28 @@ beforeEach(async () => {
   await db.accounts.clear();
   await db.actions.clear();
   useSettings.setState({
-    tab: 'home',
+    tab: 'feed',
     toasts: [],
     online: true,
-    settings: { ...useSettings.getState().settings, sourceMode: 'auto', reelMode: false, storageCapMb: 0, persistStorage: false },
+    settings: { ...useSettings.getState().settings, reelMode: false, storageCapMb: 0, persistStorage: false },
   });
 });
 
 describe('szkielet aplikacji', () => {
-  it('renderuje nagłówek, cztery zakładki i zapisane posty', async () => {
+  it('renderuje nagłówek, trzy zakładki i zapisane posty', async () => {
     await seedSavedPost();
     render(<App />);
-    expect(await screen.findByText('X-Offline')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Zapisane' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Na żywo' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Ustawienia' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Zapisane' })).toBeTruthy();
+    const nav = screen.getByRole('navigation', { name: 'Główna nawigacja' });
+    expect(within(nav).getByRole('button', { name: 'Zapisane' })).toBeTruthy();
+    expect(within(nav).getByRole('button', { name: 'X' })).toBeTruthy();
+    expect(within(nav).getByRole('button', { name: 'Ustawienia' })).toBeTruthy();
     await waitFor(() => expect(document.querySelectorAll('.post').length).toBeGreaterThan(0));
   });
 
   it('na pustej bazie pokazuje instrukcję, a nie sztuczne posty', async () => {
     render(<App />);
-    expect(await screen.findByText(/Pusto w pamięci/i)).toBeTruthy();
+    expect(await screen.findByText(/Tu będzie Twoja kolejka do czytania/i)).toBeTruthy();
     expect(document.querySelectorAll('.post')).toHaveLength(0);
     expect(await db.posts.count()).toBe(0);
   });
@@ -64,31 +65,25 @@ describe('szkielet aplikacji', () => {
     await seedSavedPost();
     render(<App />);
     const user = userEvent.setup();
-    await screen.findByText('X-Offline');
-    await user.click(screen.getByRole('button', { name: 'Na żywo' }));
-    expect(await screen.findByText(/Automatyczny offline/i)).toBeTruthy();
-    expect(screen.getByText(/Profile, które śledzimy/i)).toBeTruthy();
+    await screen.findByRole('heading', { name: 'Zapisane' });
+    await user.click(screen.getByRole('button', { name: 'X' }));
+    expect(await screen.findByText(/Przeglądaj X jak zwykle/i)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Ustawienia' }));
+    expect(await screen.findByText('Miejsce')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Zapisane' }));
     await waitFor(() => expect(document.querySelectorAll('.post').length).toBeGreaterThan(0));
   });
 
-  it('zapisuje i usuwa post z offline', async () => {
-    const post = makePost({ text: 'Post do zapisania' });
-    await db.posts.put(post);
+  it('usuwa post z offline jednym stuknięciem', async () => {
+    await seedSavedPost();
     render(<App />);
     const user = userEvent.setup();
-    await waitFor(() => expect(document.querySelectorAll('.post').length).toBeGreaterThan(0));
+    await waitFor(() => expect(document.querySelectorAll('.post').length).toBe(1));
 
     const card = document.querySelector('.post') as HTMLElement;
     await user.click(card.querySelector('.action.save') as HTMLButtonElement);
-    await waitFor(async () => expect(await db.posts.where('savedAt').above(0).count()).toBe(1), { timeout: 8000 });
-
-    // Drugie kliknięcie dopiero, gdy kafel skończył zapisywanie (w trakcie przycisk jest zajęty).
-    const savedCard = document.querySelector('.post') as HTMLElement;
-    const saveBtn = savedCard.querySelector('.action.save') as HTMLButtonElement;
-    await waitFor(() => expect(saveBtn.classList.contains('busy')).toBe(false), { timeout: 8000 });
-    await user.click(saveBtn);
     await waitFor(async () => expect(await db.posts.where('savedAt').above(0).count()).toBe(0), { timeout: 8000 });
+    expect(await screen.findByText(/Tu będzie Twoja kolejka do czytania/i)).toBeTruthy();
   }, 20000);
 
   it('pokazuje licznik nieprzeczytanych na zakładce „Zapisane”', async () => {
@@ -97,6 +92,9 @@ describe('szkielet aplikacji', () => {
     await db.posts.update(read.id, { readAt: Date.now() });
 
     render(<App />);
+    const user = userEvent.setup();
+    // Licznik widać, gdy nie patrzymy na listę.
+    await user.click(await screen.findByRole('button', { name: 'X' }));
     const nav = await screen.findByRole('navigation', { name: 'Główna nawigacja' });
     await waitFor(() => expect(nav.querySelector('.badge-count')?.textContent).toBe('1'), { timeout: 5000 });
     // Sam licznik znika, gdy wszystko przeczytane.
@@ -105,69 +103,67 @@ describe('szkielet aplikacji', () => {
     await waitFor(() => expect(nav.querySelector('.badge-count')).toBeNull(), { timeout: 5000 });
   });
 
-  it('ustawienia pokazują tryb źródła (bez trybu demo) i limit miejsca', async () => {
+  it('ustawienia są minimalistyczne: miejsce i czytanie, bez proxy i trybów źródła', async () => {
     render(<App />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Ustawienia' }));
-    expect(await screen.findByText(/Limit offline/i)).toBeTruthy();
+    expect(await screen.findByText('Miejsce')).toBeTruthy();
     expect(screen.getByText(/bez limitu/)).toBeTruthy();
+    expect(screen.getByText('Czytanie')).toBeTruthy();
+    expect(screen.queryByText(/proxy/i)).toBeNull();
+    expect(screen.queryByText(/Tryb pracy/)).toBeNull();
     expect(screen.queryByText(/Tylko demo/i)).toBeNull();
-    expect(screen.getByText(/^Auto$/)).toBeTruthy();
-    expect(await screen.findByRole('heading', { name: 'Diagnostyka', level: 2 })).toBeTruthy();
+    expect(screen.getByText(/Zaawansowane/)).toBeTruthy();
+  });
+
+  it('zakładka X nie ma profili ani ramek — tylko podgląd i zbieranie', async () => {
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'X' }));
+    expect(await screen.findByText(/Przeglądaj X jak zwykle/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Otwórz X' })).toBeTruthy();
+    expect(screen.queryByText(/Profile, które śledzimy/i)).toBeNull();
+    expect(screen.queryByText(/Podgląd w ramce/i)).toBeNull();
+    expect(document.querySelector('iframe')).toBeNull();
   });
 });
 
-describe('regresje (to wywalało apkę)', () => {
-  it('filtr „Z kolejki akcji” nie wysypuje interfejsu', async () => {
-    const post = await seedSavedPost();
-    await db.actions.add({
-      kind: 'like',
-      tweetId: post.nativeId,
-      postId: post.id,
-      authorHandle: post.authorHandle,
-      status: 'pending',
-      attempts: 0,
-      createdAt: Date.now(),
-      origin: 'offline-reader',
-    });
-    render(<App />);
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Zapisane' }));
-    await waitFor(() => expect(document.querySelectorAll('.post').length).toBeGreaterThan(0));
-    await user.click(await screen.findByText('Z kolejki akcji'));
-    // Przed poprawką: ReferenceError „Cannot access 'queuedIds' before initialization”
-    // i React odmontowywał całe drzewo (biały ekran w APK).
-    expect(document.querySelectorAll('.post').length).toBe(1);
-    expect(screen.queryByText(/Coś się wysypało/i)).toBeNull();
-  });
-
-  it('szukanie i sortowanie nie psują listy', async () => {
+describe('lista zapisanych', () => {
+  it('szukanie filtruje listę', async () => {
     await seedSavedPost({ text: 'Tramwaje nocne wracają na trasę', authorHandle: 'kt_zabrze' });
     await seedSavedPost({ text: 'Koncert w parku', authorHandle: 'miasto_pl' });
     render(<App />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Zapisane' }));
     await waitFor(() => expect(document.querySelectorAll('.post').length).toBe(2));
 
-    await user.type(screen.getByPlaceholderText(/Szukaj w zapisanych/i), 'koncert');
+    await user.type(screen.getByPlaceholderText(/Szukaj/i), 'koncert');
     await waitFor(() => expect(document.querySelectorAll('.post').length).toBe(1));
 
-    await user.clear(screen.getByPlaceholderText(/Szukaj w zapisanych/i));
-    await user.click(await screen.findByText('Po autorze'));
+    await user.clear(screen.getByPlaceholderText(/Szukaj/i));
     await waitFor(() => expect(document.querySelectorAll('.post').length).toBe(2));
   });
 
-  it('oznaczanie jako przeczytane działa z paska wyboru', async () => {
+  it('filtr nieprzeczytanych i zbiorcze oznaczanie działają', async () => {
     const a = await seedSavedPost({ text: 'pierwszy' });
     await seedSavedPost({ text: 'drugi' });
     render(<App />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Zapisane' }));
     await waitFor(() => expect(document.querySelectorAll('.post').length).toBe(2));
 
-    await user.click(screen.getByRole('button', { name: 'Wybierz wiele' }));
-    await user.click(await screen.findByText(/Zaznacz widoczne/));
-    await user.click(await screen.findByRole('button', { name: /Przeczytane/ }));
+    await user.click(await screen.findByRole('button', { name: /Nieprzeczytane/ }));
+    await user.click(await screen.findByRole('button', { name: /Oznacz wszystkie jako przeczytane/ }));
     await waitFor(async () => expect((await db.posts.get(a.id))?.readAt).toBeGreaterThan(0), { timeout: 5000 });
+  });
+
+  it('polubienie z listy dokłada akcję do kolejki', async () => {
+    const post = await seedSavedPost({ text: 'do polubienia' });
+    render(<App />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(document.querySelectorAll('.post').length).toBe(1));
+
+    const card = document.querySelector('.post') as HTMLElement;
+    await user.click(card.querySelector('.action.like') as HTMLButtonElement);
+    await waitFor(async () => expect((await db.posts.get(post.id))?.xLiked).toBe(true), { timeout: 5000 });
+    expect(await db.actions.count()).toBe(1);
   });
 });

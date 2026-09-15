@@ -78,20 +78,17 @@ Logika: `apps/web/src/lib/actions.ts`, transport: `window.__xofflineReplay` w in
 `XLivePlugin.replay`. Świeżo pobrany post **nie nadpisuje** Twoich lokalnych flag, jeśli dla niego
 czeka akcja (patrz `upsertPosts`) — inaczej odświeżanie anuluowałoby Twoje polubienia.
 
-## Zakładki X w dwie strony
+## Zakładki X → offline
 
-- `mirrorBookmarks` (domyślnie wł.): wchodzisz w X w `Zakładki` → to, co tam jest, wskakuje do offline
-  (skrypt oznacza źródło `bookmarks-mirror`, a `capture.ts` traktuje takie posty priorytetowo — wchodzą
-  ponad limit celu, bo sam fakt zapisania w X jest Twoją intencją).
-- `mirrorToBookmarks` (domyślnie wył.): zapisanie posta w X-Offline klika też zakładkę w X.
-  Wyłączone, żeby nie zaśmiecać Ci konta bez pytania.
+`mirrorBookmarks` (domyślnie wł.): wchodzisz w X w `Zakładki` → to, co tam jest, wskakuje do offline
+(skrypt oznacza źródło `bookmarks-mirror`, a `capture.ts` traktuje takie posty priorytetowo — wchodzą
+ponad limit celu, bo sam fakt zapisania w X jest Twoją intencją).
 
 ## Ryzyka — przeczytaj
 
 1. **Automatyzacja jest contra ToS X.** Klikanie serduszek/zakładek skryptem to automatyzacja konta;
    realnie przy kilku–kilkudziesięciu akcjach dziennie ryzyko jest małe, ale jest (rate limit, timout,
-   w ostateczności ograniczenia konta). Ustawienie `Wysyłaj zaległe akcje przy łączu` możesz wyłączyć
-   i klikać samemu.
+   w ostateczności ograniczenia konta). Apka odtwarza tylko to, co sam kliknąłeś offline.
 2. **Zmiana UI/API** → przestanie zbierać albo klikać. Naprawa to zwykle jedna linia w
    `xoffline-capture.js` (`isTweetLike`, lista `data-testid`) albo w `normalize.ts`.
 3. **Prywatność**: jedyne, co apka robi z Twoją sesją, to (a) czyta to, i tak widoczne na ekranie,

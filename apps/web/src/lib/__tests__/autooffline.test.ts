@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/db';
-import { captureEvents, followHandles, ingestPosts, ingestTweets, savedOfflineCount } from '@/lib/capture';
+import { captureEvents, ingestPosts, ingestTweets, savedOfflineCount } from '@/lib/capture';
 import { hasPendingFor, maybeReplay, reportResults, retryErrors, toggleBookmark, toggleLike } from '@/lib/actions';
 import { useSettings } from '@/lib/store';
-import { useFill } from '@/lib/autosync';
 import { makePost, mockNetwork } from './helpers';
 import type { NormalizedPost } from '@/lib/normalize';
 import type { PostRecord } from '@/lib/types';
@@ -38,22 +37,16 @@ beforeEach(async () => {
     online: true,
     settings: {
       ...useSettings.getState().settings,
-      sourceMode: 'auto',
       autoCapture: true,
       autoTarget: 5,
       storageCapMb: 0,
-      mirrorToBookmarks: false,
       mirrorBookmarks: true,
-      replayActions: true,
-      mediaOnWifiOnly: false,
-      trimOverTarget: false,
       persistStorage: false,
-      followList: 'orbita_pl, nasa',
     },
   });
 });
 
-describe('polityka auto-zapisu', () => {
+describe('polityka auto-zapisu (tylko WebView)', () => {
   it('zapisuje do celu i zatrzymuje się na nim', async () => {
     const report = await ingestPosts(stubPosts(9), { via: 'auto-scroll', source: 'live-scroll' });
     expect(report.seen).toBe(9);
@@ -99,20 +92,6 @@ describe('polityka auto-zapisu', () => {
     expect(report.saved).toBe(4);
   });
 
-  it('przy lustrzance w drugą stronę dokleja akcję „bookmark”', async () => {
-    useSettings.setState({ settings: { ...useSettings.getState().settings, autoTarget: 10, mirrorToBookmarks: true } });
-    await ingestPosts(stubPosts(2), { via: 'auto-scroll', source: 'live-scroll' });
-    const rows = await db.actions.toArray();
-    expect(rows).toHaveLength(2);
-    expect(rows.every((r) => r.kind === 'bookmark' && r.status === 'pending' && r.origin === 'mirror')).toBe(true);
-  });
-
-  it('twarde przycięcie do celu odznacza najstarsze', async () => {
-    useSettings.setState({ settings: { ...useSettings.getState().settings, autoTarget: 3, trimOverTarget: true } });
-    await ingestPosts(stubPosts(6), { via: 'auto-scroll', source: 'live-scroll' });
-    expect(await savedOfflineCount()).toBe(3);
-  });
-
   it('ingestTweets ogarnia surowy payload z GraphQL (legacy + favorited)', async () => {
     const raw = {
       source: 'live-scroll',
@@ -153,18 +132,9 @@ describe('polityka auto-zapisu', () => {
     expect(post?.origin).toBe('live');
   });
 
-  it('wpisuje realny profil na listę kont i zapisuje zdarzenie w dzienniku zbierania', async () => {
+  it('zapisuje zdarzenie w dzienniku zbierania', async () => {
     await ingestPosts(stubPosts(2), { via: 'auto-scroll', source: 'live-scroll', origin: 'live' });
-    const account = await db.accounts.get('orbita_pl');
-    expect(account?.lastStatus).toBe('ok');
     expect(captureEvents().length).toBeGreaterThan(0);
-  });
-
-  it('lista profili czyta się z ustawień i ignoruje śmieci', () => {
-    useSettings.setState({
-      settings: { ...useSettings.getState().settings, followList: '@nasa, https://x.com/spacex/, zle-za-dlugie-nazwy!!, , ok_1' },
-    });
-    expect(followHandles()).toEqual(['nasa', 'spacex', 'ok_1']);
   });
 });
 
@@ -217,15 +187,6 @@ describe('kolejka akcji (polub / zapisz teraz, wyślij później)', () => {
     expect(row.status).toBe('pending');
   });
 
-  it('wysyłka wyłączona w ustawieniach → nic się nie dzieje', async () => {
-    const post = await onePost();
-    await toggleLike(post);
-    useSettings.setState({ settings: { ...useSettings.getState().settings, replayActions: false } });
-    const res = await maybeReplay();
-    expect(res.deferred).toBe(true);
-    expect(res.reason).toContain('wyłączone');
-  });
-
   it('bez łącza nie próbujemy wysyłać', async () => {
     const post = await onePost();
     await toggleLike(post);
@@ -248,31 +209,4 @@ describe('kolejka akcji (polub / zapisz teraz, wyślij później)', () => {
     expect(after?.status).toBe('sent');
     expect(after?.sentAt).toBeGreaterThan(0);
   });
-});
-
-describe('edytor „dociągnij do celu” (tryb przeglądarkowy)', () => {
-  it('loguje brak profili zamiast zaciągać cokolwiek z sufitu', async () => {
-    useSettings.setState({ settings: { ...useSettings.getState().settings, followList: '', autoTarget: 10 } });
-    await useFill.getState().start(10);
-    expect(useFill.getState().running).toBe(false);
-    expect(useFill.getState().error).toMatch(/Nie ma skąd czytać|profil/i);
-    expect(await savedOfflineCount()).toBe(0);
-  });
-
-  it('zatrzymuje się, gdy profili nie da się pobrać (brak proxy)', async () => {
-    mockNetwork({ fail: true });
-    useSettings.setState({ settings: { ...useSettings.getState().settings, followList: 'orbita_pl', autoTarget: 12 } });
-    await useFill.getState().start(12);
-    expect(useFill.getState().running).toBe(false);
-    expect(await savedOfflineCount()).toBe(0);
-    expect(useFill.getState().log.some((l) => l.kind === 'warn' || l.kind === 'error')).toBe(true);
-  }, 20000);
-
-  it('nie startuje drugi raz w trakcie pracy', async () => {
-    useSettings.setState({ settings: { ...useSettings.getState().settings, followList: 'orbita_pl', autoTarget: 10 } });
-    const first = useFill.getState().start(10);
-    const second = useFill.getState().start(10);
-    await Promise.all([first, second]);
-    expect(useFill.getState().running).toBe(false);
-  }, 20000);
 });

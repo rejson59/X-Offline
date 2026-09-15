@@ -68,6 +68,44 @@ class XOfflineDB extends Dexie {
         }
         await meta.delete('welcomeSeeded');
       });
+    // v4: tylko WebView. Czyścimy listę śledzonych profili i historię zadań pobierania
+    // (API/proxy nie istnieje — posty przychodzą wyłącznie z podglądu X) oraz
+    // przestarzałe klucze ustawień. Zapisane posty i media zostają nietknięte.
+    this.version(4)
+      .stores({
+        posts: '&id, nativeId, authorHandle, createdAt, savedAt, readAt, source, origin, *tags',
+        blobs: '&key, postId, url, createdAt',
+        accounts: '&handle, lastSyncAt',
+        jobs: '++id, status, createdAt',
+        meta: '&key',
+        actions: '++id, status, kind, tweetId, createdAt, sentAt',
+      })
+      .upgrade(async (tx) => {
+        await tx.table('accounts').clear();
+        await tx.table('jobs').clear();
+        const meta = tx.table<MetaRow, string>('meta');
+        const settingsRow = await meta.get('settings');
+        if (settingsRow?.value && typeof settingsRow.value === 'object') {
+          const value = settingsRow.value as Record<string, unknown>;
+          for (const key of [
+            'sourceMode',
+            'proxyUrl',
+            'liveFrameTemplate',
+            'followList',
+            'autoSyncOnOpen',
+            'mirrorToBookmarks',
+            'replayActions',
+            'mediaOnWifiOnly',
+            'trimOverTarget',
+            'pruneKeepPosts',
+            'scrollBatch',
+          ]) {
+            delete value[key];
+          }
+          await meta.put({ key: 'settings', value });
+        }
+        await meta.delete('firstRunTip');
+      });
   }
 }
 

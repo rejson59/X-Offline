@@ -114,7 +114,7 @@ najpierw odinstaluj starą wersję.
 
 |                                  | PWA                              | APK                                             |
 | -------------------------------- | -------------------------------- | ----------------------------------------------- |
-| pobieranie postów z X            | tylko przez proxy (CORS)         | **bez proxy** (`CapacitorHttp`)                 |
+| zbieranie postów z X             | — (PWA czyta bibliotekę)         | **podgląd X** (WebView z Twoją sesją)           |
 | media offline                    | IndexedDB + Cache API             | IndexedDB (WebView ma własny przydział miejsca)  |
 | eksport biblioteki                | pobranie pliku                    | plik na dysku (Documents albo katalog apki) + udostępnianie systemowe |
 | przycisk „wstecz”                 | —                                | zamyka czytnik / sheet, potem start, potem exit   |
@@ -126,7 +126,7 @@ Manifest w repo ma już wszystkie potrzebne filtry, więc po instalacji działa:
 
 | Skąd                                                                 | Co się dzieje                                                       |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| „Udostępnij” w X / przeglądarce / dowolnej apce (tekst, `text/plain`)  | link wpada do kolejki pobierania (`/status/…` → post, reszta → podpowiedź) |
+| „Udostępnij” w X / przeglądarce / dowolnej apce (tekst, `text/plain`)  | link z `/status/…` otwiera się w podglądzie X i zapisuje do offline |
 | tapnięcie linku `x.com/*/status/…` („Otwórz w X-Offline”)              | to samo, bez otwierania przeglądarki                                |
 | zaznaczony tekst → menu → „X-Offline” (`PROCESS_TEXT`)                | to samo, nawet gdy nie ma tam linku (apka powie, czego brakuje)      |
 
@@ -137,7 +137,7 @@ Wszystkie trzy ścieżki obsługuje `MainActivity.captureSharedIntent()`:
   odbiera go przez `XLive.consumeSharedIntent()`.
 
 Nic nie ginie i nic nie trzeba dopisywać — jedyne, co warto wiedzieć, to że link bez `/status/…`
-(np. sam profil) nie jest pobierany: apka mówi wprost, że to nie post.
+(np. sam profil) nie jest otwierany: apka mówi wprost, że to nie post.
 
 ## 6. Rozwiązywanie problemów
 
@@ -156,5 +156,5 @@ Nic nie ginie i nic nie trzeba dopisywać — jedyne, co warto wiedzieć, to że
 - **`SDK location not found`** → `ANDROID_HOME` albo `android/local.properties`.
 - **`Unsupported class file major version`** → JDK za nowy/stary dla gradle; użyj JDK 21 (`java -version`).
 - **Biały ekran po instalacji** → brak `npm run build` przed `cap sync`; sprawdź `android/app/src/main/assets/public/index.html`.
-- **Pusto w „Zapisane” na telefonie** → pobierz raz z WIFI (tryb `auto` użyje sieci natywnej) albo zaimportuj
-  wyeksportowany `.json`.
+- **Pusto w „Zapisane” na telefonie** → otwórz zakładkę X, zaloguj się i przewiń trochę
+  (albo zaimportuj wyeksportowany `.json`). Zbieranie działa tylko w otwartym podglądzie.

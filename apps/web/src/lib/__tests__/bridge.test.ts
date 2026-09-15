@@ -68,10 +68,8 @@ beforeEach(async () => {
       autoCapture: true,
       autoTarget: 50,
       mirrorBookmarks: true,
-      mirrorToBookmarks: false,
       storageCapMb: 0,
       persistStorage: false,
-      replayActions: true,
     },
   });
   plugin = fakePlugin();

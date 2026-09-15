@@ -190,6 +190,13 @@ export const IconRefresh = (p: P) => (
   </svg>
 );
 
+export const IconBook = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z" />
+    <path d="M5 19.5A1.5 1.5 0 0 1 6.5 18H19v3H6.5a1.5 1.5 0 0 1-1.5-1.5z" />
+  </svg>
+);
+
 export const IconX = (p: P) => (
   <svg {...base(p)}>
     <path d="M5 4.5h3.3l4 5.4 4.3-5.4H19l-6 7.5 6.4 8h-3.3l-4.2-5.6-4.5 5.6H5.1l6.2-7.7z" fill="currentColor" stroke="none" />

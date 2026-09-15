@@ -3,8 +3,6 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath } from 'node:url';
 
-const proxyTarget = process.env.XOFFLE_PROXY ?? 'http://127.0.0.1:8787';
-
 export default defineConfig({
   plugins: [
     react(),
@@ -26,8 +24,8 @@ export default defineConfig({
         start_url: '/?source=pwa',
         scope: '/',
         shortcuts: [
-          { name: 'Zapisane offline', short_name: 'Offline', url: '/?tab=offline' },
-          { name: 'Pobierz posty', short_name: 'Pobierz', url: '/?tab=live' },
+          { name: 'Zapisane offline', short_name: 'Offline', url: '/?tab=feed' },
+          { name: 'Otwórz X', short_name: 'X', url: '/?tab=x' },
         ],
         share_target: {
           action: '/?import=1',
@@ -52,16 +50,6 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
-            // Odpowiedzi proxy (listy postów) — sieciowo, ale zapisujemy kopię do IDB osobno.
-            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/api/'),
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'xoffline-api',
-              networkTimeoutSeconds: 8,
-              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
-          {
             // Media z publicznego CDN X — CacheFirst, żeby offline odtwarzały się natychmiast.
             urlPattern: ({ url }) => /twimg\.com$/.test(url.hostname) || url.hostname.endsWith('.pbs.twimg.com'),
             handler: 'CacheFirst',
@@ -84,10 +72,6 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     allowedHosts: true,
-    proxy: {
-      '/api': { target: proxyTarget, changeOrigin: true, selfHandleResponse: false },
-      '/media': { target: proxyTarget, changeOrigin: true },
-    },
   },
   preview: { host: '0.0.0.0', port: 5173, allowedHosts: true },
   build: {
