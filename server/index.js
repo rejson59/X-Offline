@@ -173,7 +173,8 @@ const server = createServer(async (req, res) => {
       JSON.stringify({
         ok: true,
         service: 'x-offline-proxy',
-        version: '0.1.0',
+        // Wersja serwera proxy — trzymamy ją zgodną z package.json (0.2.0).
+        version: '0.2.0',
         upstream: upstreamState,
         cacheSize: cache.size,
         ts: new Date().toISOString(),
