@@ -6,7 +6,7 @@ on:
       branch:
         description: 'Branch do zbudowania'
         required: false
-        default: 'arena/01a09eef-x-offline'
+        default: 'main'
         type: string
       variant:
         description: 'debug = instaluje się od razu; release = potrzebne secrets ANDROID_KEYSTORE_*'
